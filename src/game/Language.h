@@ -554,6 +554,7 @@ enum MangosStrings
     LANG_NPCINFO_CHAR                   = 539,
     LANG_NPCINFO_LEVEL                  = 540,
     LANG_NPCINFO_HEALTH                 = 541,
+    LANG_NPCINFO_MANA                   = 11017,
     LANG_NPCINFO_FLAGS                  = 542,
     LANG_NPCINFO_LOOT                   = 543,
     LANG_NPCINFO_POSITION               = 544,
@@ -561,6 +562,10 @@ enum MangosStrings
     LANG_NPCINFO_TRAINER                = 546,
     LANG_NPCINFO_DUNGEON_ID             = 547,
     LANG_NPCINFO_ACTIVE_VISIBILITY      = 1030,
+    LANG_NPCINFO_EQUIPMENT              = 1031,
+    LANG_NPCINFO_INHABIT_TYPE           = 1032,
+    LANG_NPCINFO_ARMOR                  = 1033,
+    LANG_NPCINFO_AIINFO                 = 1034,
 
     LANG_PINFO_ACCOUNT                  = 616,
     LANG_PINFO_LEVEL                    = 549,
@@ -649,6 +654,8 @@ enum MangosStrings
     LANG_BG_WS_F_PLACED                 = 613,
     LANG_BG_WS_ALLIANCE_FLAG_RESPAWNED  = 614,
     LANG_BG_WS_HORDE_FLAG_RESPAWNED     = 615,
+    LANG_COMMAND_SOUND_NOT_FOUND        = 617,
+    LANG_COMMAND_SOUND_LIST             = 618,
 
     //LANG_BG_EY_START_ONE_MINUTE       = 636,
     //LANG_BG_EY_START_HALF_MINUTE      = 637,
@@ -900,7 +907,7 @@ enum MangosStrings
     LANG_LOG_FILTERS_STATE_HEADER       = 1027,
     LANG_ALL_LOG_FILTERS_SET_TO_S       = 1028,
     LANG_RA_ONLY_COMMAND                = 1029,
-    // Room for more level 4              1030-1099 not used
+    // Room for more level 4              1035-1099 not used
 
     // Level 3 (continue)
     LANG_ACCOUNT_SETADDON               = 1100,
@@ -979,7 +986,9 @@ enum MangosStrings
     LANG_REMOVE_RIDING_NOT_HAVE         = 1173,
     LANG_REMOVE_RIDING_ERROR            = 1174,
     LANG_REMOVE_RIDING_SUCCESS          = 1175,
-    // Room for more level 3              1176-1199 not used
+    LANG_CREATURE_MODEL_ENTRY           = 1176,
+    LANG_NO_CREATURE_MODEL_ENTRY_FOUND  = 1177,
+    // Room for more level 3              1178-1199 not used
 
     // Debug commands
     LANG_CINEMATIC_NOT_EXIST            = 1200,

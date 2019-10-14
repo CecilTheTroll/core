@@ -591,6 +591,9 @@ Player::Player(WorldSession *session) : Unit(),
     xy_speed = 0.0f;
 
     m_justBoarded = false;
+
+    m_longSightSpell = 0;
+    m_longSightRange = 0.0f;
 }
 
 Player::~Player()
@@ -1528,6 +1531,7 @@ void Player::SetDeathState(DeathState s)
         RemoveAuraTypeOnDeath(SPELL_AURA_MOD_SHAPESHIFT);
 
         RemovePet(PET_SAVE_REAGENTS);
+        Uncharm();
 
         // remove uncontrolled pets
         RemoveMiniPet();
@@ -1811,11 +1815,12 @@ bool Player::SwitchInstance(uint32 newInstanceId)
 
     //remove auras before removing from map...
     RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_CHANGE_MAP | AURA_INTERRUPT_FLAG_MOVE | AURA_INTERRUPT_FLAG_TURNING);
-    RemoveSpellsCausingAura(SPELL_AURA_MOD_CHARM);
-    RemoveSpellsCausingAura(SPELL_AURA_MOD_POSSESS);
-    RemoveSpellsCausingAura(SPELL_AURA_AOE_CHARM);
+    RemoveCharmAuras();
     DisableSpline();
     SetMover(this);
+
+    // Clear hostile refs so that we have no cross-map (and thread) references being maintained
+    getHostileRefManager().deleteReferences();
 
     // remove from old map now
     oldmap->Remove(this, false);
@@ -2062,6 +2067,9 @@ bool Player::ExecuteTeleportFar(ScheduledTeleportData *data)
         SetFallInformation(0, data->z);
         ScheduleDelayedOperation(DELAYED_CAST_HONORLESS_TARGET);
 
+        // Clear hostile refs so that we have no cross-map (and thread) references being maintained
+        getHostileRefManager().deleteReferences();
+
         // if the player is saved before worldport ack (at logout for example)
         // this will be used instead of the current location in SaveToDB
 
@@ -2203,6 +2211,8 @@ void Player::RemoveFromWorld()
     ///- The player should only be removed when logging out
     if (IsInWorld())
         GetCamera().ResetView();
+
+    SetEscortingGuid(ObjectGuid());
 
     Unit::RemoveFromWorld();
 }
@@ -2405,9 +2415,9 @@ Creature* Player::GetNPCIfCanInteractWith(ObjectGuid guid, uint32 npcflagmask)
         return NULL;
 
     // not unfriendly
-    if (FactionTemplateEntry const* factionTemplate = sFactionTemplateStore.LookupEntry(unit->getFaction()))
+    if (FactionTemplateEntry const* factionTemplate = sObjectMgr.GetFactionTemplateEntry(unit->getFaction()))
         if (factionTemplate->faction)
-            if (FactionEntry const* faction = sFactionStore.LookupEntry(factionTemplate->faction))
+            if (FactionEntry const* faction = sObjectMgr.GetFactionEntry(factionTemplate->faction))
                 if (faction->reputationListID >= 0 && GetReputationMgr().GetRank(faction) <= REP_UNFRIENDLY)
                     return NULL;
 
@@ -2788,13 +2798,17 @@ void Player::GiveLevel(uint32 level)
     PlayerClassLevelInfo classInfo;
     sObjectMgr.GetPlayerClassLevelInfo(getClass(), level, &classInfo);
 
+    uint32 hp = uint32((int32(classInfo.basehealth) - int32(GetCreateHealth()))
+        + (int32(GetHealthBonusFromStamina(info.stats[STAT_STAMINA])) - int32(GetHealthBonusFromStamina(GetCreateStat(STAT_STAMINA)))));
+
+    uint32 mana = uint32((int32(classInfo.basemana) - int32(GetCreateMana()))
+        + (int32(GetManaBonusFromIntellect(info.stats[STAT_INTELLECT])) - int32(GetManaBonusFromIntellect(GetCreateStat(STAT_INTELLECT)))));
+
     // send levelup info to client
     WorldPacket data(SMSG_LEVELUP_INFO, (4 + 4 + MAX_POWERS * 4 + MAX_STATS * 4));
     data << uint32(level);
-    data << uint32((int32(classInfo.basehealth) - int32(GetCreateHealth()))
-        + ((int32(info.stats[STAT_STAMINA]) - GetCreateStat(STAT_STAMINA)) * 10));
-    // for(int i = 0; i < MAX_POWERS; ++i)                  // Powers loop (0-6)
-    data << uint32(int32(classInfo.basemana)   - int32(GetCreateMana()));
+    data << hp;
+    data << uint32(getPowerType() == POWER_MANA ? mana : 0);
     data << uint32(0);
     data << uint32(0);
     data << uint32(0);
@@ -4432,6 +4446,16 @@ void Player::DeleteOldCharacters(uint32 keepDays)
         while (resultChars->NextRow());
         delete resultChars;
     }
+}
+
+void Player::SetFly(bool enable)
+{
+    if (enable)
+        m_movementInfo.moveFlags = (MOVEFLAG_LEVITATING | MOVEFLAG_SWIMMING | MOVEFLAG_CAN_FLY | MOVEFLAG_FLYING);
+    else
+        m_movementInfo.moveFlags = (MOVEFLAG_NONE);
+
+    SendHeartBeat(true);
 }
 
 /* Preconditions:
@@ -6097,7 +6121,7 @@ void Player::setFactionForRace(uint8 race)
 
 ReputationRank Player::GetReputationRank(uint32 faction) const
 {
-    FactionEntry const* factionEntry = sFactionStore.LookupEntry(faction);
+    FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(faction);
     return GetReputationMgr().GetRank(factionEntry);
 }
 
@@ -6224,7 +6248,7 @@ void Player::RewardReputation(Unit *pVictim, float rate)
     {
         int32 donerep1 = CalculateReputationGain(REPUTATION_SOURCE_KILL, Rep->repvalue1, Rep->repfaction1, pVictim->getLevel());
         donerep1 = int32(donerep1 * rate);
-        FactionEntry const *factionEntry1 = sFactionStore.LookupEntry(Rep->repfaction1);
+        FactionEntry const *factionEntry1 = sObjectMgr.GetFactionEntry(Rep->repfaction1);
         uint32 current_reputation_rank1 = GetReputationMgr().GetRank(factionEntry1);
         if (factionEntry1 && current_reputation_rank1 <= Rep->reputation_max_cap1)
             GetReputationMgr().ModifyReputation(factionEntry1, donerep1);
@@ -6232,7 +6256,7 @@ void Player::RewardReputation(Unit *pVictim, float rate)
         // Wiki: Team factions value divided by 2
         if (factionEntry1 && Rep->is_teamaward1)
         {
-            FactionEntry const *team1_factionEntry = sFactionStore.LookupEntry(factionEntry1->team);
+            FactionEntry const *team1_factionEntry = sObjectMgr.GetFactionEntry(factionEntry1->team);
             if (team1_factionEntry)
                 GetReputationMgr().ModifyReputation(team1_factionEntry, donerep1 / 2, true);
         }
@@ -6242,7 +6266,7 @@ void Player::RewardReputation(Unit *pVictim, float rate)
     {
         int32 donerep2 = CalculateReputationGain(REPUTATION_SOURCE_KILL, Rep->repvalue2, Rep->repfaction2, pVictim->getLevel());
         donerep2 = int32(donerep2 * rate);
-        FactionEntry const *factionEntry2 = sFactionStore.LookupEntry(Rep->repfaction2);
+        FactionEntry const *factionEntry2 = sObjectMgr.GetFactionEntry(Rep->repfaction2);
         uint32 current_reputation_rank2 = GetReputationMgr().GetRank(factionEntry2);
         if (factionEntry2 && current_reputation_rank2 <= Rep->reputation_max_cap2)
             GetReputationMgr().ModifyReputation(factionEntry2, donerep2);
@@ -6250,7 +6274,7 @@ void Player::RewardReputation(Unit *pVictim, float rate)
         // Wiki: Team factions value divided by 2
         if (factionEntry2 && Rep->is_teamaward2)
         {
-            FactionEntry const *team2_factionEntry = sFactionStore.LookupEntry(factionEntry2->team);
+            FactionEntry const *team2_factionEntry = sObjectMgr.GetFactionEntry(factionEntry2->team);
             if (team2_factionEntry)
                 GetReputationMgr().ModifyReputation(team2_factionEntry, donerep2 / 2, true);
         }
@@ -6270,7 +6294,7 @@ void Player::RewardReputation(Quest const *pQuest)
         {
             int32 rep = CalculateReputationGain(REPUTATION_SOURCE_QUEST,  pQuest->RewRepValue[i], pQuest->RewRepFaction[i], GetQuestLevelForPlayer(pQuest));
 
-            if (FactionEntry const* factionEntry = sFactionStore.LookupEntry(pQuest->RewRepFaction[i]))
+            if (FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(pQuest->RewRepFaction[i]))
                 GetReputationMgr().ModifyReputation(factionEntry, rep);
         }
     }
@@ -6440,13 +6464,8 @@ void Player::UpdateZone(uint32 newZone, uint32 newArea)
 
         if (sWorld.getConfig(CONFIG_BOOL_WEATHER))
         {
-            if (Weather *wth = sWorld.FindWeather(zoneEntry->Id))
-                wth->SendWeatherUpdateToPlayer(this);
-            else if (!sWorld.AddWeather(zoneEntry->Id))
-            {
-                // send fine weather packet to remove old zone's weather
-                Weather::SendFineWeatherUpdateToPlayer(this);
-            }
+            Weather* wth = GetMap()->GetWeatherSystem()->FindOrCreateWeather(newZone);
+            wth->SendWeatherUpdateToPlayer(this);
         }
     }
 
@@ -9925,9 +9944,12 @@ InventoryResult Player::CanUseItem(Item *pItem, bool not_loading) const
             if (msg != EQUIP_ERR_OK)
                 return msg;
 
-            if (pItem->GetSkill() != 0)
+            if (uint32 skill = pItem->GetSkill())
             {
-                if (GetSkillValue(pItem->GetSkill()) == 0)
+                // Fist weapons use unarmed skill calculations, but we must query fist weapon skill presence to use this item
+                if (pProto->SubClass == ITEM_SUBCLASS_WEAPON_FIST)
+                    skill = SKILL_FIST_WEAPONS;
+                if (!GetSkillValue(skill))
                     return EQUIP_ERR_NO_REQUIRED_PROFICIENCY;
             }
 
@@ -9960,14 +9982,7 @@ InventoryResult Player::CanUseItem(ItemPrototype const *pProto, bool not_loading
         if (pProto->RequiredSpell != 0 && !HasSpell(pProto->RequiredSpell))
             return EQUIP_ERR_NO_REQUIRED_PROFICIENCY;
 
-
-        auto playerRank = m_honorMgr.GetHighestRank().rank;
-
-        if (sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_EQUIP_REQUIREMENTS)
-            && sWorld.GetWowPatch() < WOW_PATCH_106)
-        {
-            playerRank = m_honorMgr.GetRank().rank;
-        }
+        auto playerRank = (sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_EQUIP_REQUIREMENTS) && sWorld.GetWowPatch() < WOW_PATCH_106) ? m_honorMgr.GetRank().rank : m_honorMgr.GetHighestRank().rank;
 
         if (not_loading && playerRank < (uint8)pProto->RequiredHonorRank)
             return EQUIP_ERR_CANT_EQUIP_RANK;
@@ -11793,7 +11808,7 @@ void Player::PrepareGossipMenu(WorldObject *pSource, uint32 menuId)
         bool hasMenuItem = true;
         bool isGMSkipConditionCheck = false;
 
-        if (itr->second.conditionId && !sObjectMgr.IsPlayerMeetToCondition(itr->second.conditionId, this, GetMap(), pSource, CONDITION_FROM_GOSSIP_OPTION))
+        if (itr->second.conditionId && !sObjectMgr.IsConditionSatisfied(itr->second.conditionId, this, GetMap(), pSource, CONDITION_FROM_GOSSIP_OPTION))
         {
             if (isGameMaster())                             // Let GM always see menu items regardless of conditions
                 isGMSkipConditionCheck = true;
@@ -12069,7 +12084,7 @@ void Player::OnGossipSelect(WorldObject* pSource, uint32 gossipListId)
             break;
         case GOSSIP_OPTION_VENDOR:
         case GOSSIP_OPTION_ARMORER:
-            GetSession()->SendListInventory(guid);
+            GetSession()->SendListInventory(guid, pMenuData.m_gAction_menu ? pMenuData.m_gAction_menu : VENDOR_MENU_ALL);
             break;
         case GOSSIP_OPTION_STABLEPET:
             GetSession()->SendStablePet(guid);
@@ -12152,7 +12167,7 @@ uint32 Player::GetGossipTextId(uint32 menuId, WorldObject const* source)
         // Take the text that has the highest conditionId of all fitting
         // No condition and no text with condition found OR higher and fitting condition found
         if ((!itr->second.conditionId && !lastConditionId) ||
-                (itr->second.conditionId > lastConditionId && sObjectMgr.IsPlayerMeetToCondition(itr->second.conditionId, this, GetMap(), source, CONDITION_FROM_GOSSIP_MENU)))
+                (itr->second.conditionId > lastConditionId && sObjectMgr.IsConditionSatisfied(itr->second.conditionId, this, GetMap(), source, CONDITION_FROM_GOSSIP_MENU)))
         {
             lastConditionId = itr->second.conditionId;
             textId = itr->second.text_id;
@@ -12647,7 +12662,7 @@ void Player::AddQuest(Quest const *pQuest, Object *questGiver)
     }
 
     if (pQuest->GetRepObjectiveFaction())
-        if (FactionEntry const* factionEntry = sFactionStore.LookupEntry(pQuest->GetRepObjectiveFaction()))
+        if (FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(pQuest->GetRepObjectiveFaction()))
             GetReputationMgr().SetVisible(factionEntry);
 
     uint32 qtime = 0;
@@ -12694,7 +12709,8 @@ void Player::AddQuest(Quest const *pQuest, Object *questGiver)
 
         // starting initial DB quest script
         if (pQuest->GetQuestStartScript() != 0)
-            GetMap()->ScriptsStart(sQuestStartScripts, pQuest->GetQuestStartScript(), questGiver, this);
+            if (WorldObject* pQuestGiver = questGiver->ToWorldObject())
+                GetMap()->ScriptsStart(sQuestStartScripts, pQuest->GetQuestStartScript(), pQuestGiver, this);
 
     }
 
@@ -12796,7 +12812,7 @@ void Player::FullQuestComplete(uint32 questId)
         uint32 repValue = pQuest->GetRepObjectiveValue();
         uint32 curRep = GetReputationMgr().GetReputation(repFaction);
         if (curRep < repValue)
-            if (FactionEntry const *factionEntry = sFactionStore.LookupEntry(repFaction))
+            if (FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(repFaction))
                 GetReputationMgr().SetReputation(factionEntry, repValue);
     }
 
@@ -14693,7 +14709,8 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder *holder)
     // must be before inventory (some items required reputation check)
     m_reputationMgr.LoadFromDB(holder->GetResult(PLAYER_LOGIN_QUERY_LOADREPUTATION));
 
-    _LoadInventory(holder->GetResult(PLAYER_LOGIN_QUERY_LOADINVENTORY), time_diff);
+    bool has_epic_mount = false; // Needed for riding skill replacement in patch 1.12.
+    _LoadInventory(holder->GetResult(PLAYER_LOGIN_QUERY_LOADINVENTORY), time_diff, has_epic_mount);
     _LoadItemLoot(holder->GetResult(PLAYER_LOGIN_QUERY_LOADITEMLOOT));
 
     // update items with duration and realtime
@@ -14848,7 +14865,81 @@ bool Player::LoadFromDB(ObjectGuid guid, SqlQueryHolder *holder)
     LoadCustomFlags();
     sBattleGroundMgr.PlayerLoggedIn(this); // Add to BG queue if needed
     CreatePacketBroadcaster();
+
+    // Note, if not using accurate mounts be sure to update all trainer spells in the
+    // database or players will be stuck with the old skill system
+    if (sWorld.GetWowPatch() >= WOW_PATCH_112 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_MOUNTS))
+        UpdateOldRidingSkillToNew(has_epic_mount);
+
     return true;
+}
+
+// The new riding skills (Apprentice/Journeyman) were added in patch 1.12.
+// Prior to that there was a separate skill of each type of mount.
+// All players who have the old skill need to have it swapped for the new one.
+void Player::UpdateOldRidingSkillToNew(bool has_epic_mount)
+{
+    // Already has the new skill, no need to do anything.
+    if (HasSkill(SKILL_RIDING))
+        return;
+
+    bool has_old_riding_skill = false;
+
+    if (HasSkill(SKILL_RIDING_HORSE))
+    {
+        SetSkill(SKILL_RIDING_HORSE, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_WOLF))
+    {
+        SetSkill(SKILL_RIDING_WOLF, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_TIGER))
+    {
+        SetSkill(SKILL_RIDING_TIGER, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_RAM))
+    {
+        SetSkill(SKILL_RIDING_RAM, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_RAPTOR))
+    {
+        SetSkill(SKILL_RIDING_RAPTOR, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_MECHANOSTRIDER))
+    {
+        SetSkill(SKILL_RIDING_MECHANOSTRIDER, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_UNDEAD_HORSE))
+    {
+        SetSkill(SKILL_RIDING_UNDEAD_HORSE, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (HasSkill(SKILL_RIDING_KODO))
+    {
+        SetSkill(SKILL_RIDING_KODO, 0, 0);
+        has_old_riding_skill = true;
+    }
+
+    if (!has_old_riding_skill)
+        return;
+    
+    if (has_epic_mount)
+        learnSpell(33391, false); // Journeyman Riding
+    else
+        learnSpell(33388, false); // Apprentice Riding
 }
 
 void Player::SendPacketsAtRelogin()
@@ -15039,7 +15130,7 @@ void Player::LoadCorpse()
     }
 }
 
-void Player::_LoadInventory(QueryResult *result, uint32 timediff)
+void Player::_LoadInventory(QueryResult *result, uint32 timediff, bool &has_epic_mount)
 {
     //               0                1      2         3        4      5             6                 7           8     9    10    11   12    13              14
     //SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, text, bag, slot, item, itemEntry, generated_loot
@@ -15076,6 +15167,10 @@ void Player::_LoadInventory(QueryResult *result, uint32 timediff)
                 sLog.outError("Player::_LoadInventory: Player %s has an unknown item (id: #%u) in inventory, deleted.", GetName(), item_id);
                 continue;
             }
+
+            // Needed for riding skill replacement in patch 1.12.
+            if ((proto->RequiredSkill == SKILL_RIDING) && (proto->RequiredSkillRank == 150))
+                has_epic_mount = true;
 
             // Duplicate check. Player listed item in AH and then immediately relogged, before the item
             // was deleted from the inventory in the DB
@@ -16863,12 +16958,12 @@ void Player::SendSpellMod(SpellModifier const* mod)
     for (int eff = 0; eff < 64; ++eff)
     {
         uint64 _mask = uint64(1) << eff;
-        if (mod->mask.IsFitToFamilyMask(_mask))
+        if (!!(mod->mask & _mask))
         {
             int32 val = 0;
             for (SpellModList::const_iterator itr = m_spellMods[mod->op].begin(); itr != m_spellMods[mod->op].end(); ++itr)
             {
-                if ((*itr)->type == mod->type && ((*itr)->mask.IsFitToFamilyMask(_mask)))
+                if ((*itr)->type == mod->type && !!((*itr)->mask & _mask))
                     val += (*itr)->value;
             }
             WorldPacket data(Opcode, (1 + 1 + 4));
@@ -17343,7 +17438,28 @@ void Player::Mount(uint32 mount, uint32 spellId)
 {
     if (!mount)
     {
+        RemoveSpellsCausingAura(SPELL_AURA_MOUNTED);
         SendMountResult(MOUNTRESULT_NOTMOUNTABLE);
+        return;
+    }
+
+    if (IsMounted())
+    {
+        SendMountResult(MOUNTRESULT_ALREADYMOUNTED);
+        return;
+    }
+
+    if (!spellId && IsInDisallowedMountForm())
+    {
+        RemoveSpellsCausingAura(SPELL_AURA_MOUNTED);
+        SendMountResult(MOUNTRESULT_SHAPESHIFTED);
+        return;
+    }
+
+    if (HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_LOOTING))
+    {
+        RemoveSpellsCausingAura(SPELL_AURA_MOUNTED);
+        SendMountResult(MOUNTRESULT_LOOTING);
         return;
     }
 
@@ -17373,7 +17489,9 @@ void Player::Unmount(bool from_aura)
 {
     if (!IsMounted())
     {
-        SendDismountResult(DISMOUNTRESULT_NOTMOUNTED);
+        if (!from_aura)
+            SendDismountResult(DISMOUNTRESULT_NOTMOUNTED);
+
         return;
     }
 
@@ -17475,6 +17593,7 @@ bool Player::BuyItemFromVendor(ObjectGuid vendorGuid, uint32 item, uint8 count, 
 
     VendorItemData const* vItems = pCreature->GetVendorItems();
     VendorItemData const* tItems = pCreature->GetVendorTemplateItems();
+    
     if ((!vItems || vItems->Empty()) && (!tItems || tItems->Empty()))
     {
         SendBuyError(BUY_ERR_CANT_FIND_ITEM, pCreature, item, 0);
@@ -17485,8 +17604,12 @@ bool Player::BuyItemFromVendor(ObjectGuid vendorGuid, uint32 item, uint8 count, 
     uint32 tCount = tItems ? tItems->GetItemCount() : 0;
 
     size_t vendorslot = vItems ? vItems->FindItemSlot(item) : vCount;
-    if (vendorslot > vCount)
-        vendorslot = vCount + (tItems ? tItems->FindItemSlot(item) : tCount);
+
+    // If item was not found in npc_vendor, check npc_vendor_template.
+    if (vendorslot >= vCount)
+    {
+        vendorslot = tItems ? tItems->FindItemSlot(item) + vCount : tCount + vCount;
+    }
 
     if (vendorslot >= vCount + tCount)
     {
@@ -17935,6 +18058,51 @@ template void Player::UpdateVisibilityOf(WorldObject const* viewPoint, Corpse*  
 template void Player::UpdateVisibilityOf(WorldObject const* viewPoint, GameObject*    target, UpdateData& data, std::set<WorldObject*>& visibleNow);
 template void Player::UpdateVisibilityOf(WorldObject const* viewPoint, DynamicObject* target, UpdateData& data, std::set<WorldObject*>& visibleNow);
 template void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject*   target, UpdateData& data, std::set<WorldObject*>& visibleNow);
+
+void Player::SetLongSight(const Aura* aura)
+{
+    if (aura)
+    {
+        // already an active long sight spell
+        if (m_longSightSpell)
+            return;
+        m_longSightSpell = aura->GetSpellProto()->Id;
+        // Should the viewpoint be placed at a fixed range or at visibility distance ?
+        // In absence of evidence, let's move the camera at visibility distance in front of the player
+        m_longSightRange = GetMap()->GetVisibilityDistance();
+        DynamicObject* dynObj = new DynamicObject;
+        if (!dynObj->Create(GetMap()->GenerateLocalLowGuid(HIGHGUID_DYNAMICOBJECT), this, m_longSightSpell,
+            aura->GetEffIndex(), GetPositionX(), GetPositionY(), GetPositionZ(), 0, 0, DYNAMIC_OBJECT_FARSIGHT_FOCUS))
+        {
+            m_longSightSpell = 0;
+            m_longSightRange = 0.0f;
+            delete dynObj;
+            return;
+        }
+        AddDynObject(dynObj);
+        // Needed so the dyn object is properly removed
+        SetChannelObjectGuid(dynObj->GetObjectGuid());
+        GetMap()->Add(dynObj);
+        UpdateLongSight();
+        GetCamera().SetView(dynObj, false);
+    }
+    else
+    {
+        m_longSightSpell = 0;
+        m_longSightRange = 0.0f;
+        GetCamera().ResetView(false);
+    }
+}
+
+void Player::UpdateLongSight()
+{
+    if (!m_longSightSpell)
+        return;
+    if (DynamicObject* dynObj = GetDynObject(m_longSightSpell))
+        dynObj->Relocate(GetPositionX() + m_longSightRange * cos(GetOrientation()),
+                         GetPositionY() + m_longSightRange * sin(GetOrientation()),
+                         GetPositionZ());
+}
 
 void Player::InitPrimaryProfessions()
 {
@@ -18397,8 +18565,9 @@ BattleGroundBracketId Player::GetBattleGroundBracketIdFromLevel(BattleGroundType
 {
     BattleGround *bg = sBattleGroundMgr.GetBattleGroundTemplate(bgTypeId);
     ASSERT(bg);
+
     if (getLevel() < bg->GetMinLevel())
-        return BG_BRACKET_ID_FIRST;
+        return BG_BRACKET_ID_NONE;
 
     uint32 bracket_id = (getLevel() - bg->GetMinLevel()) / 10;
     if (bracket_id > MAX_BATTLEGROUND_BRACKETS)
@@ -19845,7 +20014,7 @@ bool Player::TeleportToHomebind(uint32 options, bool hearthCooldown)
         SpellEntry const *spellInfo = sSpellMgr.GetSpellEntry(8690);
         AddSpellAndCategoryCooldowns(spellInfo, 6948);
     }
-    return TeleportTo(m_homebindMapId, m_homebindX, m_homebindY, m_homebindZ, GetOrientation(), options); 
+    return TeleportTo(m_homebindMapId, m_homebindX, m_homebindY, m_homebindZ, GetOrientation(), (options | TELE_TO_FORCE_MAP_CHANGE));
 }
 
 Object* Player::GetObjectByTypeMask(ObjectGuid guid, TypeMask typemask)
@@ -20214,8 +20383,8 @@ bool Player::ChangeReputationsForRace(uint8 oldRace, uint8 newRace)
     uint32 oldRaceMask = 1 << (oldRace - 1);
     uint32 newRaceMask = 1 << (newRace - 1);
     uint32 newCapitalId = GetCapitalReputationForRace(newRace);
-    FactionEntry const* oldCapitalFaction = sFactionStore.LookupEntry(GetCapitalReputationForRace(oldRace));
-    FactionEntry const* newCapitalFaction = sFactionStore.LookupEntry(newCapitalId);
+    FactionEntry const* oldCapitalFaction = sObjectMgr.GetFactionEntry(GetCapitalReputationForRace(oldRace));
+    FactionEntry const* newCapitalFaction = sObjectMgr.GetFactionEntry(newCapitalId);
 
     if (!newCapitalFaction || !oldCapitalFaction)
         return false;
@@ -20259,7 +20428,7 @@ bool Player::ChangeReputationsForRace(uint8 oldRace, uint8 newRace)
         if (found)
             continue;
         FactionState* pState = (FactionState*)GetReputationMgr().GetState(it->second.ID);
-        FactionEntry const* pFactionEntry = sFactionStore.LookupEntry(it->second.ID);
+        FactionEntry const* pFactionEntry = sObjectMgr.GetFactionEntry(it->second.ID);
         if (!pState || !pFactionEntry)
             continue;
 
@@ -20287,8 +20456,8 @@ bool Player::ChangeReputationsForRace(uint8 oldRace, uint8 newRace)
     // Certaines reputs a inverser
     for (std::map<uint32, uint32>::const_iterator it = sObjectMgr.factionchange_reputations.begin(); it != sObjectMgr.factionchange_reputations.end(); ++it)
     {
-        FactionEntry const* my_new_reputation = sFactionStore.LookupEntry(newTeam == ALLIANCE ? it->first : it->second);
-        FactionEntry const* my_old_reputation = sFactionStore.LookupEntry(newTeam == ALLIANCE ? it->second : it->first);
+        FactionEntry const* my_new_reputation = sObjectMgr.GetFactionEntry(newTeam == ALLIANCE ? it->first : it->second);
+        FactionEntry const* my_old_reputation = sObjectMgr.GetFactionEntry(newTeam == ALLIANCE ? it->second : it->first);
         // 'my_new_reputation' = 'my_old_reputation'
         // Et on supprime 'my_old_reputation'
         FactionState* pNew = (FactionState*)GetReputationMgr().GetState(my_new_reputation);
@@ -20553,6 +20722,10 @@ void Player::LootMoney(int32 money, Loot* loot)
 
 void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
 {
+    // Honor System was added in 1.4.
+    if (sWorld.GetWowPatch() < WOW_PATCH_104 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
+        return;
+
     if (!uVictim)
         return;
 
@@ -20566,6 +20739,10 @@ void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
         if (cVictim->IsCivilian() && !isHonorOrXPTarget(cVictim))
         {
             if (!sWorld.getConfig(CONFIG_BOOL_ENABLE_VD))
+                return;
+
+            // Dishonorable kills were added in 1.5.
+            if (sWorld.GetWowPatch() < WOW_PATCH_105 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
                 return;
 
             m_honorMgr.Add(HonorMgr::DishonorableKillPoints(getLevel()), DISHONORABLE, cVictim);
@@ -20585,6 +20762,10 @@ void Player::RewardHonor(Unit* uVictim, uint32 groupSize)
 
 void Player::RewardHonorOnDeath()
 {
+    // Honor System was added in 1.4.
+    if (sWorld.GetWowPatch() < WOW_PATCH_104 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PVP_TIMELINE))
+        return;
+
     if (GetAura(2479, EFFECT_INDEX_0))             // Honorless Target
         return;
 

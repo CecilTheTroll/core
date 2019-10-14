@@ -28,6 +28,8 @@
 #include "World.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Guild.h"
+#include "GuildMgr.h"
 #include "Opcodes.h"
 #include "Chat.h"
 #include "Log.h"
@@ -837,7 +839,7 @@ bool ChatHandler::HandleModifyFactionCommand(char* args)
     if (!ExtractUint32KeyFromLink(&args, "Hfaction", factionid))
         return false;
 
-    if (!sFactionTemplateStore.LookupEntry(factionid))
+    if (!sObjectMgr.GetFactionTemplateEntry(factionid))
     {
         PSendSysMessage(LANG_WRONG_FACTION, factionid);
         SetSentErrorMessage(true);
@@ -1610,6 +1612,80 @@ bool ChatHandler::HandleLookupTeleCommand(char * args)
     return true;
 }
 
+bool ChatHandler::HandleLookupGuildCommand(char* args)
+{
+    if (!args || !*args)
+        return false;
+
+    char* name = ExtractQuotedArg(&args);
+    if (!name)
+        return false;
+
+    std::string nameStr(name);
+    Guild* guild = sGuildMgr.GetGuildByName(nameStr);
+    if (!guild)
+    {
+        SendSysMessage(LANG_GUILD_NOT_FOUND);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    PSendSysMessage("Guild %s (ID %u):", guild->GetName().c_str(), guild->GetId());
+    std::string leaderName;
+    sObjectMgr.GetPlayerNameByGUID(guild->GetLeaderGuid(), leaderName);
+    PSendSysMessage("- Leader: %s, created: %u-%u-%u", leaderName.c_str(),
+        guild->GetCreatedYear(), guild->GetCreatedMonth(),
+        guild->GetCreatedDay());
+    PSendSysMessage("- Members: %u (%u accounts)", guild->GetMemberSize(), guild->GetAccountsNumber());
+    PSendSysMessage("- MOTD: %s", guild->GetMOTD().c_str());
+    PSendSysMessage("- INFO: %s", guild->GetGINFO().c_str());
+
+    return true;
+}
+
+bool ChatHandler::HandleLookupSoundCommand(char* args)
+{
+    if (!*args)
+        return false;
+
+    std::string namepart = args;
+
+    // converting string that we try to find to lower case
+    strToLower(namepart);
+
+    uint32 counter = 0;                                     // Counter for figure out that we found smth.
+
+    for (uint32 id = 0; id < sObjectMgr.GetMaxSoundId(); ++id)
+    {
+        SoundEntriesEntry const *soundEntry = sObjectMgr.GetSoundEntry(id);
+        if (soundEntry)
+        {
+            int loc = GetSessionDbcLocale();
+            std::string name = soundEntry->Name;
+
+            if (name.empty())
+                continue;
+
+            strToLower(name);
+
+            if (name.find(namepart) == std::string::npos)
+                continue;
+
+            if (m_session)
+                PSendSysMessage(LANG_COMMAND_SOUND_LIST, id, id, soundEntry->Name.c_str());
+            else
+                PSendSysMessage("%u - %s", id, soundEntry->Name.c_str());
+
+            counter++;
+        }
+    }
+
+    if (counter == 0)
+        SendSysMessage(LANG_COMMAND_SOUND_NOT_FOUND);
+
+    return true;
+}
+
 //Enable\Disable accept whispers (for GM)
 bool ChatHandler::HandleWhispersCommand(char* args)
 {
@@ -2294,5 +2370,26 @@ bool ChatHandler::HandleGoldRemoval(char* args)
             "SELECT money, guid, name FROM characters WHERE name = '%s'",
             name.c_str());
     }
+    return true;
+}
+
+bool ChatHandler::HandleDebugOverflowCommand(char* args)
+{
+    std::string name("\360\222\214\245\360\222\221\243\360\222\221\251\360\223\213\215\360\223\213\210\360\223\211\241\360\222\214\245\360\222\221\243\360\222\221\251\360\223\213\215\360\223\213\210\360\223\211\241");
+    // Overflow: \xd808\xdf25\xd809\xdc63\xd809\xdc69\xd80c\xdecd\xd80c\xdec8\xd80c\xde61\000\xdf25\xd809\xdc63
+
+    normalizePlayerName(name);
+
+    return true;
+}
+
+
+bool ChatHandler::HandleDebugChatFreezeCommand(char* args)
+{
+    std::string message("| |01");
+
+    auto master = GetSession()->GetMasterPlayer();
+    master->Whisper(message, LANG_UNIVERSAL, master);
+
     return true;
 }

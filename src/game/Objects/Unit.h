@@ -1056,7 +1056,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void StopAttackFaction(uint32 faction_id);
         Unit* SelectNearestTarget(float dist) const;
         Unit* SelectRandomUnfriendlyTarget(Unit* except = nullptr, float radius = ATTACK_DISTANCE, bool inFront = false, bool isValidAttackTarget = false) const;
-        Unit* SelectRandomFriendlyTarget(Unit* except = nullptr, float radius = ATTACK_DISTANCE) const;
+        Unit* SelectRandomFriendlyTarget(Unit* except = nullptr, float radius = ATTACK_DISTANCE, bool inCombat = false) const;
         Unit* SummonCreatureAndAttack(uint32 creatureEntry, Unit* pVictim= nullptr);
         bool IsSecondaryThreatTarget();
         bool hasNegativeAuraWithInterruptFlag(uint32 flag);
@@ -1260,6 +1260,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         uint32 GetFirstAuraBySpellIconAndVisual(uint32 spellIconId, uint32 spellVisual) const;
 
         uint64 GetAuraApplicationMask() const;
+        uint64 GetNegativeAuraApplicationMask() const;
 
         SpellAuraHolderBounds GetSpellAuraHolderBounds(uint32 spell_id)
         {
@@ -1328,13 +1329,13 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void NearTeleportTo(float x, float y, float z, float orientation, uint32 teleportOptions = TELE_TO_NOT_LEAVE_TRANSPORT | TELE_TO_NOT_LEAVE_COMBAT | TELE_TO_NOT_UNSUMMON_PET);
         void NearLandTo(float x, float y, float z, float orientation);
         void TeleportPositionRelocation(float x, float y, float z, float o);
-
-        void MonsterMoveWithSpeed(float x, float y, float z, float speed, bool generatePath = false, bool forceDestination = false);
+        void MonsterMoveWithSpeed(float x, float y, float z, float o, float speed, uint32 options);
         void MonsterMove(float x, float y, float z); // Utilise vitesse de course
+
         // recommend use MonsterMove/MonsterMoveWithSpeed for most case that correctly work with movegens
         // if used additional args in ... part then floats must explicitly casted to double
         void SendHeartBeat(bool includingSelf = true);
-        void SetFly(bool enable);
+        virtual void SetFly(bool enable);
         void SetWalk(bool enable, bool asDefault = true);
         void SetLevitate(bool enable);
 
@@ -1360,6 +1361,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void SetCharmGuid(ObjectGuid charm) { SetGuidValue(UNIT_FIELD_CHARM, charm); }
         ObjectGuid const& GetTargetGuid() const { return GetGuidValue(UNIT_FIELD_TARGET); }
         void SetTargetGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_TARGET, targetGuid); }
+        void ClearTarget() { SetTargetGuid(ObjectGuid()); }
         ObjectGuid const& GetChannelObjectGuid() const { return GetGuidValue(UNIT_FIELD_CHANNEL_OBJECT); }
         void SetChannelObjectGuid(ObjectGuid targetGuid) { SetGuidValue(UNIT_FIELD_CHANNEL_OBJECT, targetGuid); }
 
@@ -1416,6 +1418,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void AddGuardian(Pet* pet);
         void RemoveGuardian(Pet* pet);
         void RemoveGuardians();
+        void RemoveGuardiansWithEntry(uint32 entry);
         Pet* FindGuardianWithEntry(uint32 entry);
         uint32 GetGuardianCountWithEntry(uint32 entry);
 
@@ -1530,12 +1533,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
             return form == FORM_CAT || form == FORM_BEAR || form == FORM_DIREBEAR;
         }
 
-        bool IsInDisallowedMountForm() const
-        {
-            ShapeshiftForm form = GetShapeshiftForm();
-            return form != FORM_NONE && form != FORM_BATTLESTANCE && form != FORM_BERSERKERSTANCE && form != FORM_DEFENSIVESTANCE &&
-                form != FORM_SHADOW && form != FORM_STEALTH;
-        }
+        bool IsInDisallowedMountForm() const;
 
         float m_modMeleeHitChance;
         float m_modRangedHitChance;
@@ -1651,6 +1649,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         void SetNativeDisplayId(uint32 modelId) { SetUInt32Value(UNIT_FIELD_NATIVEDISPLAYID, modelId); }
         void setTransForm(uint32 spellid) { m_transform = spellid;}
         uint32 getTransForm() const { return m_transform;}
+        float GetCollisionHeight() const { return m_modelCollisionHeight * m_nativeScaleOverride; }
 
         // at any changes to scale and/or displayId
         void UpdateModelData();
@@ -1707,6 +1706,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         SpellAuraProcResult HandleMechanicImmuneResistanceAuraProc(Unit *pVictim, uint32 damage, Aura* triggeredByAura, SpellEntry const *procSpell, uint32 procFlag, uint32 procEx, uint32 cooldown);
         SpellAuraProcResult HandleAddTargetTriggerAuraProc(Unit *pVictim, uint32 damage, Aura* triggeredByAura, SpellEntry const *procSpell, uint32 procFlag, uint32 procEx, uint32 cooldown);
         SpellAuraProcResult HandleModResistanceAuraProc(Unit* pVictim, uint32 damage, Aura* triggeredByAura, SpellEntry const *procSpell, uint32 procFlag, uint32 procEx, uint32 cooldown);
+        SpellAuraProcResult HandleModDamageAuraProc(Unit* pVictim, uint32 damage, Aura* triggeredByAura, SpellEntry const *procSpell, uint32 procFlag, uint32 procEx, uint32 cooldown);
         SpellAuraProcResult HandleNULLProc(Unit* /*pVictim*/, uint32 /*damage*/, Aura* /*triggeredByAura*/, SpellEntry const* /*procSpell*/, uint32 /*procFlag*/, uint32 /*procEx*/, uint32 /*cooldown*/)
         {
             // no proc handler for this aura type
@@ -1962,6 +1962,7 @@ class MANGOS_DLL_SPEC Unit : public WorldObject
         GameObjectList m_gameObj;
         bool m_isSorted;
         uint32 m_transform;
+        float m_modelCollisionHeight;
 
         AuraList m_modAuras[TOTAL_AURAS];
         float m_auraModifiersGroup[UNIT_MOD_END][MODIFIER_TYPE_END];

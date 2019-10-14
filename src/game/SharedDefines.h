@@ -781,7 +781,11 @@ enum AuraState
     AURA_STATE_JUDGEMENT                    = 5,            // C   |
     //AURA_STATE_UNKNOWN6                   = 6,            //     | not used
     AURA_STATE_HUNTER_PARRY                 = 7,            // C   |
-    AURA_STATE_ROGUE_ATTACK_FROM_STEALTH    = 7,            // C   | FIX ME: not implemented yet!
+    AURA_STATE_ROGUE_ATTACK_FROM_STEALTH    = 8,            // C   | FIX ME: not implemented yet!
+    // Custom aura states - not based on spell data:
+    AURA_STATE_HEALTHLESS_15_PERCENT        = 9,
+    AURA_STATE_HEALTHLESS_10_PERCENT        = 10,
+    AURA_STATE_HEALTHLESS_5_PERCENT         = 11,
 };
 
 // Spell mechanics
@@ -817,7 +821,10 @@ enum Mechanics
     MECHANIC_DAZE             = 27,
     MECHANIC_DISCOVERY        = 28,
     MECHANIC_IMMUNE_SHIELD    = 29,                         // Divine (Blessing) Shield/Protection and Ice Block
-    MECHANIC_SAPPED           = 30
+    MECHANIC_SAPPED           = 30,
+
+    // Custom
+    MECHANIC_SLOW_CAST_SPEED  = 31                          // Curse of Tongues
 };
 
 #define FIRST_MECHANIC          1
@@ -2008,9 +2015,7 @@ enum WeatherType
     WEATHER_TYPE_FINE       = 0,
     WEATHER_TYPE_RAIN       = 1,
     WEATHER_TYPE_SNOW       = 2,
-    WEATHER_TYPE_STORM      = 3,
-    WEATHER_TYPE_THUNDERS   = 86,
-    WEATHER_TYPE_BLACKRAIN  = 90
+    WEATHER_TYPE_STORM      = 3
 };
 
 #define MAX_WEATHER_TYPE 4
@@ -2077,7 +2082,7 @@ enum ChatLinkColors
 {
     CHAT_LINK_COLOR_TALENT      = 0xff4e96f7,   // blue
     CHAT_LINK_COLOR_SPELL       = 0xff71d5ff,   // bright blue
-    CHAT_LINK_COLOR_ENCHANT     = 0xffffd000,   // orange
+    CHAT_LINK_COLOR_ENCHANT     = 0xffffffff,   // white
 };
 
 // Values from ItemPetFood (power of (value-1) used for compare with CreatureFamilyEntry.petDietMask

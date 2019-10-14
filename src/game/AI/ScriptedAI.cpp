@@ -12,7 +12,6 @@
 
 ScriptedAI::ScriptedAI(Creature* pCreature) : CreatureAI(pCreature),
     me(pCreature),
-    m_bCombatMovement(true),
     m_uiEvadeCheckCooldown(2500),
     m_uiHomeArea(m_creature->GetAreaId())
 {
@@ -56,7 +55,7 @@ void ScriptedAI::AttackStart(Unit* pWho)
         m_creature->SetInCombatWith(pWho);
         pWho->SetInCombatWith(m_creature);
 
-        if (IsCombatMovement())
+        if (m_CombatMovementEnabled)
             m_creature->GetMotionMaster()->MoveChase(pWho);
     }
     else
@@ -146,7 +145,7 @@ void ScriptedAI::DoPlaySoundToSet(WorldObject* pSource, uint32 uiSoundId)
     if (!pSource)
         return;
 
-    if (!GetSoundEntriesStore()->LookupEntry(uiSoundId))
+    if (!sObjectMgr.GetSoundEntry(uiSoundId))
     {
         sLog.outError("Invalid soundId %u used in DoPlaySoundToSet (Source: TypeId %u, GUID %u)", uiSoundId, pSource->GetTypeId(), pSource->GetGUIDLow());
         return;
@@ -256,33 +255,6 @@ SpellEntry const* ScriptedAI::SelectSpell(Unit* pTarget, int32 uiSchool, int32 u
     return apSpell[rand()%uiSpellCount];
 }
 
-bool ScriptedAI::CanCast(Unit* pTarget, SpellEntry const* pSpellEntry, bool bTriggered)
-{
-    //No target so we can't cast
-    if (!pTarget || !pSpellEntry)
-        return false;
-
-    //Silenced so we can't cast
-    if (!bTriggered && m_creature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_SILENCED))
-        return false;
-
-    //Check for power
-    if (!bTriggered && m_creature->GetPower((Powers)pSpellEntry->powerType) < pSpellEntry->manaCost)
-        return false;
-
-    SpellRangeEntry const* pTempRange = GetSpellRangeStore()->LookupEntry(pSpellEntry->rangeIndex);
-
-    //Spell has invalid range store so we can't use it
-    if (!pTempRange)
-        return false;
-
-    //Unit is out of range of this spell
-    if (!m_creature->IsInRange(pTarget, pTempRange->minRange, pTempRange->maxRange))
-        return false;
-
-    return true;
-}
-
 void ScriptedAI::DoResetThreat()
 {
     if (!m_creature->CanHaveThreatList() || m_creature->getThreatManager().isThreatListEmpty())
@@ -358,11 +330,11 @@ void ScriptedAI::GetPlayersWithinRange(std::list<Player*>& players, float range)
     Cell::VisitWorldObjects(m_creature, searcher, range);
 }
 
-Player* ScriptedAI::GetNearestPlayer(float range)
+Player* ScriptedAI::GetNearestHostilePlayer(float range)
 {
     Player* target = nullptr;
     MaNGOS::NearestHostileUnitCheck check(m_creature, range);
-    MaNGOS::PlayerSearcher<MaNGOS::NearestHostileUnitCheck> searcher(target, check);
+    MaNGOS::PlayerLastSearcher<MaNGOS::NearestHostileUnitCheck> searcher(target, check);
     Cell::VisitWorldObjects(m_creature, searcher, range);
 
     return target;
@@ -384,11 +356,6 @@ void ScriptedAI::SetEquipmentSlots(bool bLoadDefault, int32 uiMainHand, int32 ui
 
     if (uiRanged >= 0)
         m_creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_DISPLAY + 2, uint32(uiRanged));
-}
-
-void ScriptedAI::SetCombatMovement(bool bCombatMove)
-{
-    m_bCombatMovement = bCombatMove;
 }
 
 // Hacklike storage used for misc creatures that are expected to evade of outside of a certain area.
@@ -492,13 +459,9 @@ void ScriptedAI::DoModifyThreatPercent(Unit* pUnit, int32 pct)
     me->getThreatManager().modifyThreatPercent(pUnit, pct);
 }
 
-void ScriptedAI::DoTeleportTo(float fX, float fY, float fZ, uint32 uiTime)
+void ScriptedAI::DoTeleportTo(float fX, float fY, float fZ)
 {
     me->NearTeleportTo(fX, fY, fZ, me->GetOrientation());
-/*
-    me->Relocate(fX, fY, fZ);
-    me->MonsterMoveWithSpeed(fX, fY, fZ, 100000);
-*/
 }
 
 void ScriptedAI::DoTeleportTo(const float fPos[4])
@@ -517,4 +480,9 @@ void ScriptedAI::DoTeleportAll(float fX, float fY, float fZ, float fO)
         if (Player* i_pl = i->getSource())
             if (i_pl->isAlive())
                 i_pl->TeleportTo(me->GetMapId(), fX, fY, fZ, fO, TELE_TO_NOT_LEAVE_COMBAT);
+}
+
+bool ScriptedAI::FillLoot(Loot* loot, Player* looter) const
+{
+    return false;
 }

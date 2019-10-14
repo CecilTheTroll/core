@@ -535,6 +535,13 @@ void WorldSession::HandleSellItemOpcode(WorldPacket & recv_data)
         return;
     }
 
+    // prevent selling item in bank slot
+    if (_player->IsBankPos(pItem->GetPos())) 
+    {
+        _player->SendSellError(SELL_ERR_CANT_SELL_ITEM, pCreature, itemGuid, 0);
+        return;
+    }
+
     // prevent sell non empty bag by drag-and-drop at vendor's item list
     if (pItem->IsBag() && !((Bag*)pItem)->IsEmpty())
     {
@@ -736,7 +743,7 @@ void WorldSession::HandleListInventoryOpcode(WorldPacket & recv_data)
     SendListInventory(guid);
 }
 
-void WorldSession::SendListInventory(ObjectGuid vendorguid)
+void WorldSession::SendListInventory(ObjectGuid vendorguid, uint8 menu_type)
 {
     DEBUG_LOG("WORLD: Sent SMSG_LIST_INVENTORY");
 
@@ -757,8 +764,8 @@ void WorldSession::SendListInventory(ObjectGuid vendorguid)
     if (!pCreature->IsStopped())
         pCreature->StopMoving();
 
-    VendorItemData const* vItems = pCreature->GetVendorItems();
-    VendorItemData const* tItems = pCreature->GetVendorTemplateItems();
+    VendorItemData const* vItems = menu_type & VENDOR_MENU_NORMAL ? pCreature->GetVendorItems() : nullptr;
+    VendorItemData const* tItems = menu_type & VENDOR_MENU_TEMPLATE ? pCreature->GetVendorTemplateItems() : nullptr;
 
     if (!vItems && !tItems)
     {
@@ -850,6 +857,13 @@ void WorldSession::HandleAutoStoreBagItemOpcode(WorldPacket & recv_data)
     {
         _player->SendEquipError(EQUIP_ERR_ITEM_DOESNT_GO_TO_SLOT, NULL, NULL);
         return;
+    }
+
+    // cheating: check if source bag / item or destination bag is in bank and player can't use bank
+    if (_player->IsBankPos(srcbag, srcslot) || dstbag >= BANK_SLOT_BAG_START && dstbag < BANK_SLOT_BAG_END)
+    {
+        if (!CanUseBank())
+            return;
     }
 
     uint16 src = pItem->GetPos();

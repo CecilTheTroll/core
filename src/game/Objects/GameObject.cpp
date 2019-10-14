@@ -318,7 +318,12 @@ void GameObject::Update(uint32 update_diff, uint32 /*p_time*/)
                             //we need to open doors if they are closed (add there another condition if this code breaks some usage, but it need to be here for battlegrounds)
                             if (GetGoState() != GO_STATE_READY)
                                 ResetDoorOrButton();
-                        //flags in AB are type_button and we need to add them here so no break!
+                            //flags in AB are type_button and we need to add them here so no break!
+                        case GAMEOBJECT_TYPE_CHEST:
+                        case GAMEOBJECT_TYPE_SPELL_FOCUS:
+                        case GAMEOBJECT_TYPE_GOOBER:
+                            // Respawn linked trap if any exists
+                            RespawnLinkedGameObject();
                         default:
                             if (!m_spawnedByDefault)        // despawn timer
                             {
@@ -1161,8 +1166,36 @@ void GameObject::TriggerLinkedGameObject(Unit* target)
     }
 
     // found correct GO
-    if (trapGO)
+    if (trapGO && trapGO->isSpawned())
         trapGO->Use(target);
+}
+
+void GameObject::RespawnLinkedGameObject()
+{
+    uint32 trapEntry = GetGOInfo()->GetLinkedGameObjectEntry();
+
+    if (!trapEntry)
+        return;
+
+    GameObjectInfo const* trapInfo = sGOStorage.LookupEntry<GameObjectInfo>(trapEntry);
+    if (!trapInfo || trapInfo->type != GAMEOBJECT_TYPE_TRAP)
+        return;
+
+    float range = 0.5f;
+
+    // search nearest linked GO
+    GameObject* trapGO = NULL;
+    {
+        // search closest with base of used GO, using max range of trap spell as search radius
+        MaNGOS::NearestGameObjectEntryInObjectRangeCheck go_check(*this, trapEntry, range);
+        MaNGOS::GameObjectLastSearcher<MaNGOS::NearestGameObjectEntryInObjectRangeCheck> checker(trapGO, go_check);
+
+        Cell::VisitGridObjects(this, checker, range);
+    }
+
+    // Respawn the trap
+    if (trapGO && !trapGO->isSpawned())
+        trapGO->Respawn();
 }
 
 GameObject* GameObject::LookupFishingHoleAround(float range)
@@ -1301,6 +1334,16 @@ void GameObject::Use(Unit* user)
             // FIXME: when GO casting will be implemented trap must cast spell to target
             if (uint32 spellId = GetGOInfo()->trap.spellId)
                 user->CastSpell(user, spellId, true, NULL, NULL, GetObjectGuid());
+
+            if (uint32 max_charges = GetGOInfo()->GetCharges())
+            {
+                AddUse();
+                if (m_useTimes >= max_charges)
+                {
+                    m_useTimes = 0;
+                    SetLootState(GO_JUST_DEACTIVATED);
+                }
+            }
 
             return;
         }
@@ -1955,7 +1998,7 @@ bool GameObject::IsHostileTo(Unit const* unit) const
         return true;
 
     // faction base cases
-    FactionTemplateEntry const*tester_faction = sFactionTemplateStore.LookupEntry(GetGOInfo()->faction);
+    FactionTemplateEntry const*tester_faction = sObjectMgr.GetFactionTemplateEntry(GetGOInfo()->faction);
     FactionTemplateEntry const*target_faction = unit->getFactionTemplateEntry();
     if (!tester_faction || !target_faction)
         return false;
@@ -1970,7 +2013,7 @@ bool GameObject::IsHostileTo(Unit const* unit) const
                 return *force <= REP_HOSTILE;
 
             // apply reputation state
-            FactionEntry const* raw_tester_faction = sFactionStore.LookupEntry(tester_faction->faction);
+            FactionEntry const* raw_tester_faction = sObjectMgr.GetFactionEntry(tester_faction->faction);
             if (raw_tester_faction && raw_tester_faction->reputationListID >= 0)
                 return ((Player const*)unit)->GetReputationMgr().GetRank(raw_tester_faction) <= REP_HOSTILE;
         }
@@ -1998,7 +2041,7 @@ bool GameObject::IsFriendlyTo(Unit const* unit) const
         return false;
 
     // faction base cases
-    FactionTemplateEntry const*tester_faction = sFactionTemplateStore.LookupEntry(GetGOInfo()->faction);
+    FactionTemplateEntry const*tester_faction = sObjectMgr.GetFactionTemplateEntry(GetGOInfo()->faction);
     FactionTemplateEntry const*target_faction = unit->getFactionTemplateEntry();
     if (!tester_faction || !target_faction)
         return false;
@@ -2013,7 +2056,7 @@ bool GameObject::IsFriendlyTo(Unit const* unit) const
                 return *force >= REP_FRIENDLY;
 
             // apply reputation state
-            if (FactionEntry const* raw_tester_faction = sFactionStore.LookupEntry(tester_faction->faction))
+            if (FactionEntry const* raw_tester_faction = sObjectMgr.GetFactionEntry(tester_faction->faction))
                 if (raw_tester_faction->reputationListID >= 0)
                     return ((Player const*)unit)->GetReputationMgr().GetRank(raw_tester_faction) >= REP_FRIENDLY;
         }

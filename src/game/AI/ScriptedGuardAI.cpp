@@ -54,6 +54,7 @@ guardAI::guardAI(Creature* pCreature, bool isCapitalGuard) : ScriptedAI(pCreatur
 
 void guardAI::Reset()
 {
+    
     GlobalCooldown = 0;
     BuffTimer = 0;                                          //Rebuff as soon as we can
 }

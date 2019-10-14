@@ -67,7 +67,7 @@ bool ChatHandler::HandleReloadAllCommand(char* /*args*/)
     HandleReloadSkillFishingBaseLevelCommand((char*)"");
 
     HandleReloadAllAreaCommand((char*)"");
-    HandleReloadAllEventAICommand((char*)"");
+    HandleReloadEventAIEventsCommand((char*)"");
     HandleReloadAllLootCommand((char*)"");
     HandleReloadAllNpcCommand((char*)"");
     HandleReloadAllQuestCommand((char*)"");
@@ -141,14 +141,6 @@ bool ChatHandler::HandleReloadAllScriptsCommand(char* /*args*/)
     HandleReloadCreatureSpellScriptsCommand((char*)"a");
     SendSysMessage("DB tables `*_scripts` reloaded.");
     sScriptMgr.CheckAllScriptTexts();
-    return true;
-}
-
-bool ChatHandler::HandleReloadAllEventAICommand(char* /*args*/)
-{
-    HandleReloadEventAITextsCommand((char*)"a");
-    HandleReloadEventAISummonsCommand((char*)"a");
-    HandleReloadEventAIScriptsCommand((char*)"a");
     return true;
 }
 
@@ -699,28 +691,23 @@ bool ChatHandler::HandleReloadEventScriptsCommand(char* args)
     return true;
 }
 
-bool ChatHandler::HandleReloadEventAITextsCommand(char* /*args*/)
+// Do not add separate reload command for scripts!
+// EventAI events must be loaded right after.
+bool ChatHandler::HandleReloadEventAIEventsCommand(char* args)
 {
+    sEventAIMgr.ClearEventData();
 
-    sLog.outString("Re-Loading Texts from `creature_ai_texts`...");
-    sEventAIMgr.LoadCreatureEventAI_Texts(true);
-    SendSysMessage("DB table `creature_ai_texts` reloaded.");
-    return true;
-}
+    if (*args != 'a')
+        sLog.outString("Re-Loading Scripts from `creature_ai_scripts`...");
 
-bool ChatHandler::HandleReloadEventAISummonsCommand(char* /*args*/)
-{
-    sLog.outString("Re-Loading Summons from `creature_ai_summons`...");
-    sEventAIMgr.LoadCreatureEventAI_Summons(true);
-    SendSysMessage("DB table `creature_ai_summons` reloaded.");
-    return true;
-}
+    sScriptMgr.LoadCreatureEventAIScripts();
 
-bool ChatHandler::HandleReloadEventAIScriptsCommand(char* /*args*/)
-{
-    sLog.outString("Re-Loading Scripts from `creature_ai_scripts`...");
-    sEventAIMgr.LoadCreatureEventAI_Scripts();
-    SendSysMessage("DB table `creature_ai_scripts` reloaded.");
+    if (*args != 'a')
+        SendSysMessage("DB table `creature_ai_scripts` reloaded.");
+
+    sLog.outString("Re-Loading Events from `creature_ai_events`...");
+    sEventAIMgr.LoadCreatureEventAI_Events();
+    SendSysMessage("DB table `creature_ai_events` reloaded.");
     return true;
 }
 
@@ -3118,7 +3105,7 @@ bool ChatHandler::HandleLookupSpellCommand(char* args)
     uint32 counter = 0;                                     // Counter for figure out that we found smth.
 
     // Search in Spell.dbc
-    for (uint32 id = 0; id < sSpellStore.GetNumRows(); id++)
+    for (uint32 id = 0; id < sSpellMgr.GetMaxSpellId(); id++)
     {
         SpellEntry const *spellInfo = sSpellMgr.GetSpellEntry(id);
         if (spellInfo)
@@ -3317,6 +3304,123 @@ bool ChatHandler::HandleLookupCreatureCommand(char* args)
 
     if (counter == 0)
         SendSysMessage(LANG_COMMAND_NOCREATUREFOUND);
+
+    return true;
+}
+
+bool ChatHandler::HandleLookupCreatureModelCommand(char* args)
+{
+    if (!*args)
+        return false;
+
+    bool fileExport = false;
+    if (ExtractLiteralArg(&args, "export"))
+        fileExport = true;
+
+    uint32 modelId = 0;
+    std::string namepart;
+    std::wstring wnamepart;
+
+    if (!ExtractOptUInt32(&args, modelId, 0))
+    {
+        namepart = args;
+        if (!Utf8toWStr(namepart, wnamepart))
+            return false;
+        wstrToLower(wnamepart);
+    }
+
+    std::stringstream  toExport;
+    uint32 lastSearchId = 0;
+    uint32 creatureCounter = 0;
+    uint32 modelCounter = 0;
+    while (true)
+    {
+        // try to find a model from the given string
+        if (!modelId && !wnamepart.empty())
+        {
+            for (; lastSearchId < sCreatureModelDataStore.GetNumRows(); ++lastSearchId)
+                if (CreatureModelDataEntry const* model = sCreatureModelDataStore.LookupEntry(lastSearchId))
+                {
+                    std::string name = model->modelName;
+                    if (Utf8FitTo(name, wnamepart))
+                    {
+                        modelCounter++;
+                        modelId = lastSearchId;
+                        if (fileExport)
+                            toExport << "-- model id " << modelId << " " << model->modelName << "\n";
+                        PSendSysMessage(LANG_CREATURE_MODEL_ENTRY, modelId, modelId, model->modelName);
+                        lastSearchId++;
+                        break;
+                    }
+                }
+            if (!modelId && !modelCounter)
+            {
+                if (fileExport)
+                    toExport << "-- No creature model found.\n";
+                SendSysMessage(LANG_NO_CREATURE_MODEL_ENTRY_FOUND);
+                return false;
+            }
+
+        }
+
+        if (!modelId)
+            break;
+
+        for (uint32 id = 0; id < sCreatureStorage.GetMaxEntry(); ++id)
+        {
+            CreatureInfo const* cInfo = sCreatureStorage.LookupEntry<CreatureInfo>(id);
+            if (!cInfo)
+                continue;
+
+            uint32 foundModelCounter = 0;
+            uint32 totalModelCounter = 0;
+            for (int i = 0; i < MAX_CREATURE_MODEL; ++i)
+                if (cInfo->ModelId[i])
+                    if (CreatureDisplayInfoEntry const* display = sCreatureDisplayInfoStore.LookupEntry(cInfo->ModelId[i]))
+                    {
+                        if (display->ModelId)
+                            totalModelCounter++;
+                        if (display->ModelId == modelId)
+                        {
+                            if (!foundModelCounter)
+                            {
+                                // Custom filter
+                                //if (cInfo->InhabitType & INHABIT_WATER)
+                                {
+                                    creatureCounter++;
+                                    if (fileExport)
+                                        toExport << id << ", /* " << cInfo->Name << " */\n";
+                                    PSendSysMessage(LANG_CREATURE_ENTRY_LIST_CHAT, id, id, cInfo->Name);
+                                }
+                            }
+                            foundModelCounter++;
+                        }
+                    }
+            if (fileExport && foundModelCounter && totalModelCounter != foundModelCounter)
+                toExport << "-- WARNING " << id << " " << cInfo->Name << " uses more than one model !\n";
+        }
+        modelId = 0;
+    }
+    if (!creatureCounter)
+    {
+        if (fileExport)
+            toExport << "-- No creature found.\n";
+        SendSysMessage(LANG_COMMAND_NOCREATUREFOUND);
+    }
+
+    if (fileExport)
+    {
+        FILE* f = fopen("creature_export.sql", "w");
+        if (!f)
+        {
+            sLog.outError("File creation failed.");
+            return false;
+        }
+        std::string exportStr = toExport.str();
+        sLog.outInfo(exportStr.c_str());
+        fputs(exportStr.c_str(), f);
+        fclose(f);
+    }
 
     return true;
 }
@@ -3639,6 +3743,49 @@ bool ChatHandler::HandleGuildDeleteCommand(char* args)
 
     return true;
 }
+
+/**
+ * Renames a guild if a guild could be found with the specified name.
+ * Usage: .guild rename "name" "new name"
+ * It is not possible to rename a guild to a name that is already in use.
+ */
+bool ChatHandler::HandleGuildRenameCommand(char* args)
+{
+    if (!args || !*args)
+        return false;
+
+    char* currentName = ExtractQuotedArg(&args);
+    if (!currentName)
+        return false;
+
+    std::string current(currentName);
+
+    char* newName = ExtractQuotedArg(&args);
+    if (!newName)
+        return false;
+
+    std::string newn(newName);
+
+    Guild* target = sGuildMgr.GetGuildByName(currentName);
+    if (!target)
+    {
+        SendSysMessage(LANG_GUILD_NOT_FOUND);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    if (Guild* existing = sGuildMgr.GetGuildByName(newn))
+    {
+        PSendSysMessage("A guild with the name '%s' already exists", newName);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    target->Rename(newn);
+    PSendSysMessage("Guild '%s' successfully renamed to '%s'. Players must relog to see the changes", currentName, newName);
+    return true;
+}
+
 
 bool ChatHandler::HandleGetDistanceCommand(char* args)
 {
@@ -4120,12 +4267,18 @@ bool ChatHandler::HandleNpcInfoCommand(char* /*args*/)
 
     PSendSysMessage(LANG_NPCINFO_CHAR, target->GetGuidStr().c_str(), faction, npcflags, Entry, displayid, nativeid);
     PSendSysMessage(LANG_NPCINFO_LEVEL, target->getLevel());
+    PSendSysMessage(LANG_NPCINFO_EQUIPMENT, target->GetCurrentEquipmentId());
     PSendSysMessage(LANG_NPCINFO_HEALTH, target->GetCreateHealth(), target->GetMaxHealth(), target->GetHealth());
+    if (target->getPowerType() == POWER_MANA)
+        PSendSysMessage(LANG_NPCINFO_MANA, target->GetCreateMana(), target->GetMaxPower(POWER_MANA), target->GetPower(POWER_MANA));
+    PSendSysMessage(LANG_NPCINFO_INHABIT_TYPE, cInfo->InhabitType);
     PSendSysMessage(LANG_NPCINFO_FLAGS, target->GetUInt32Value(UNIT_FIELD_FLAGS), target->GetUInt32Value(UNIT_DYNAMIC_FLAGS), target->getFaction());
     PSendSysMessage(LANG_COMMAND_RAWPAWNTIMES, defRespawnDelayStr.c_str(), curRespawnDelayStr.c_str());
-    PSendSysMessage(LANG_NPCINFO_LOOT,  cInfo->lootid, cInfo->pickpocketLootId, cInfo->SkinLootId);
+    PSendSysMessage(LANG_NPCINFO_LOOT, cInfo->lootid, cInfo->pickpocketLootId, cInfo->SkinLootId);
+    PSendSysMessage(LANG_NPCINFO_ARMOR, target->GetArmor());
     PSendSysMessage(LANG_NPCINFO_DUNGEON_ID, target->GetInstanceId());
     PSendSysMessage(LANG_NPCINFO_POSITION, float(target->GetPositionX()), float(target->GetPositionY()), float(target->GetPositionZ()));
+    PSendSysMessage(LANG_NPCINFO_AIINFO, target->GetAIName().c_str(), target->GetScriptName().c_str());
     PSendSysMessage(LANG_NPCINFO_ACTIVE_VISIBILITY, target->isActiveObject(), target->GetVisibilityModifier());
 
     if ((npcflags & UNIT_NPC_FLAG_VENDOR))
@@ -4152,6 +4305,23 @@ bool ChatHandler::HandleNpcPlayEmoteCommand(char* args)
     }
 
     target->HandleEmote(emote);
+
+    return true;
+}
+
+bool ChatHandler::HandleNpcResetCommand(char* args)
+{
+    auto target = getSelectedCreature();
+    if (!target)
+    {
+        SendSysMessage(LANG_SELECT_CREATURE);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    target->DoKillUnit();
+    target->Respawn();
+    target->AIM_Initialize();
 
     return true;
 }
@@ -4507,7 +4677,7 @@ bool ChatHandler::HandleStableCommand(char* /*args*/)
 
 bool ChatHandler::HandleChangeWeatherCommand(char* args)
 {
-    //Weather is OFF
+    // Weather is OFF
     if (!sWorld.getConfig(CONFIG_BOOL_WEATHER))
     {
         SendSysMessage(LANG_WEATHER_DISABLED);
@@ -4519,33 +4689,28 @@ bool ChatHandler::HandleChangeWeatherCommand(char* args)
     if (!ExtractUInt32(&args, type))
         return false;
 
-    //0 to 3, 0: fine, 1: rain, 2: snow, 3: sand
-    if (type > 3)
+    // see enum WeatherType
+    if (!Weather::IsValidWeatherType(type))
         return false;
 
     float grade;
     if (!ExtractFloat(&args, grade))
         return false;
 
-    //0 to 1, sending -1 is instand good weather
-    if (grade < 0.0f || grade > 1.0f)
-        return false;
+    // clamp grade from 0 to 1
+    if (grade < 0.0f)
+        grade = 0.0f;
+    else if (grade > 1.0f)
+        grade = 1.0f;
 
-    Player *player = m_session->GetPlayer();
-    uint32 zoneid = player->GetZoneId();
-
-    Weather* wth = sWorld.FindWeather(zoneid);
-
-    if (!wth)
-        wth = sWorld.AddWeather(zoneid);
-    if (!wth)
+    Player* player = m_session->GetPlayer();
+    uint32 zoneId = player->GetZoneId();
+    if (!sWeatherMgr.GetWeatherChances(zoneId))
     {
         SendSysMessage(LANG_NO_WEATHER);
         SetSentErrorMessage(true);
-        return false;
     }
-
-    wth->SetWeather(WeatherType(type), grade);
+    player->GetMap()->SetWeather(zoneId, (WeatherType)type, grade, false);
 
     return true;
 }
@@ -5463,6 +5628,12 @@ bool ChatHandler::HandleUnBanHelper(BanMode mode, char* args)
 
     std::string nameOrIP = cnameOrIP;
 
+    char* message = ExtractQuotedOrLiteralArg(&args);
+    if (!message)
+        return false;
+
+    std::string unbanMessage(message);
+
     switch (mode)
     {
         case BAN_ACCOUNT:
@@ -5487,8 +5658,10 @@ bool ChatHandler::HandleUnBanHelper(BanMode mode, char* args)
             break;
     }
 
-    if (sWorld.RemoveBanAccount(mode, nameOrIP))
-        PSendSysMessage(LANG_UNBAN_UNBANNED, nameOrIP.c_str());
+    std::string source = m_session ? m_session->GetPlayerName() : "CONSOLE";
+
+    if (sWorld.RemoveBanAccount(mode, source, unbanMessage, nameOrIP))
+        PSendSysMessage(LANG_UNBAN_UNBANNED, nameOrIP.c_str(), unbanMessage.c_str());
     else
         PSendSysMessage(LANG_UNBAN_ERROR, nameOrIP.c_str());
 
@@ -5512,7 +5685,7 @@ bool ChatHandler::HandleBanInfoCharacterCommand(char* args)
 {
     Player* target;
     ObjectGuid target_guid;
-    if (!ExtractPlayerTarget(&args, &target, &target_guid))
+    if (!ExtractPlayerTarget(&args, &target, &target_guid,NULL,true))
         return false;
 
     uint32 accountid = target ? target->GetSession()->GetAccountId() : sObjectMgr.GetPlayerAccountIdByGUID(target_guid);
@@ -5844,13 +6017,10 @@ bool ChatHandler::HandleGMFlyCommand(char* args)
     if (!target)
         target = m_session->GetPlayer();
 
+    target->SetFly(value);
+
     if (value)
-    {
         SendSysMessage("WARNING: Do not jump or flying mode will be removed.");
-        target->m_movementInfo.moveFlags = (MOVEFLAG_LEVITATING | MOVEFLAG_SWIMMING | MOVEFLAG_CAN_FLY | MOVEFLAG_FLYING);
-    }
-    else
-        target->m_movementInfo.moveFlags = (MOVEFLAG_NONE);
 
     if (m_session->IsReplaying())
     {
@@ -5861,8 +6031,7 @@ bool ChatHandler::HandleGMFlyCommand(char* args)
         data << movementInfo;
         m_session->SendPacket(&data);
     }
-    else
-        target->SendHeartBeat(true);
+
     PSendSysMessage(LANG_COMMAND_FLYMODE_STATUS, GetNameLink(target).c_str(), args);
     return true;
 }

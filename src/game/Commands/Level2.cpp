@@ -1399,9 +1399,9 @@ bool ChatHandler::HandleLookupFactionCommand(char* args)
 
     uint32 counter = 0;                                     // Counter for figure out that we found smth.
 
-    for (uint32 id = 0; id < sFactionStore.GetNumRows(); ++id)
+    for (uint32 id = 0; id < sObjectMgr.GetMaxFactionId(); ++id)
     {
-        FactionEntry const *factionEntry = sFactionStore.LookupEntry(id);
+        FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(id);
         if (factionEntry)
         {
             int loc = GetSessionDbcLocale();
@@ -1515,7 +1515,7 @@ bool ChatHandler::HandleModifyRepCommand(char* args)
         }
     }
 
-    FactionEntry const *factionEntry = sFactionStore.LookupEntry(factionId);
+    FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(factionId);
 
     if (!factionEntry)
     {
@@ -1630,6 +1630,10 @@ bool ChatHandler::HandleNpcAddVendorItemCommand(char* args)
     if (!ExtractOptUInt32(&args, incrtime, 0))
         return false;
 
+    uint32 itemflags;
+    if (!ExtractOptUInt32(&args, itemflags, 0))
+        return false;
+
     Creature* vendor = getSelectedCreature();
 
     uint32 vendor_entry = vendor ? vendor->GetEntry() : 0;
@@ -1640,7 +1644,7 @@ bool ChatHandler::HandleNpcAddVendorItemCommand(char* args)
         return false;
     }
 
-    sObjectMgr.AddVendorItem(vendor_entry, itemId, maxcount, incrtime);
+    sObjectMgr.AddVendorItem(vendor_entry, itemId, maxcount, incrtime, itemflags);
 
     ItemPrototype const* pProto = ObjectMgr::GetItemPrototype(itemId);
 
@@ -2079,7 +2083,7 @@ bool ChatHandler::HandleNpcFactionIdCommand(char* args)
 
     uint32 factionId = (uint32) atoi(args);
 
-    if (!sFactionTemplateStore.LookupEntry(factionId))
+    if (!sObjectMgr.GetFactionTemplateEntry(factionId))
     {
         PSendSysMessage(LANG_WRONG_FACTION, factionId);
         SetSentErrorMessage(true);
@@ -2166,7 +2170,7 @@ bool ChatHandler::HandleNpcSpawnTimeCommand(char* args)
 
     uint32 u_guidlow = pCreature->GetGUIDLow();
 
-    WorldDatabase.PExecuteLog("UPDATE creature SET spawntimesecs=%i WHERE guid=%u", stime, u_guidlow);
+    WorldDatabase.PExecuteLog("UPDATE creature SET spawntimesecsmin=%i WHERE guid=%u", stime, u_guidlow);
     pCreature->SetRespawnDelay(stime);
     PSendSysMessage(LANG_COMMAND_SPAWNTIME, stime);
 
@@ -2524,10 +2528,10 @@ bool ChatHandler::HandleGroupInfoCommand(char* args)
             stream << ", ";
         }
     }
-
+    
     PSendSysMessage(LANG_GROUP_INFO, (group->isRaidGroup() ? "Raid" : "Party"),
                     playerLink(std::to_string(group->GetId())).c_str(), playerLink(group->GetLeaderName()).c_str(),
-                    playerLink("Test").c_str(), group->GetMembersCount(), stream.str().c_str());
+                    group->GetMembersCount(), stream.str().c_str());
     return true;
 }
 
@@ -2537,7 +2541,7 @@ bool ChatHandler::HandlePInfoCommand(char* args)
     Player* target;
     ObjectGuid target_guid;
     std::string target_name;
-    if (!ExtractPlayerTarget(&args, &target, &target_guid, &target_name))
+    if (!ExtractPlayerTarget(&args, &target, &target_guid, &target_name, true))
         return false;
 
     if (HasLowerSecurity(target, target ? ObjectGuid() : target_guid))
@@ -3675,7 +3679,7 @@ bool ChatHandler::HandleCharacterReputationCommand(char* args)
     FactionStateList const& targetFSL = target->GetReputationMgr().GetStateList();
     for (FactionStateList::const_iterator itr = targetFSL.begin(); itr != targetFSL.end(); ++itr)
     {
-        FactionEntry const *factionEntry = sFactionStore.LookupEntry(itr->second.ID);
+        FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(itr->second.ID);
 
         ShowFactionListHelper(factionEntry, loc, &itr->second, target);
     }

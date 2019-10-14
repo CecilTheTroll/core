@@ -358,7 +358,7 @@ bool Group::AddMember(ObjectGuid guid, const char* name, uint8 joinMethod)
             // Compare group and player bind
             InstanceGroupBind* groupBind = GetBoundInstance(map->GetId());
             InstancePlayerBind* playerBind = player->GetBoundInstance(map->GetId());
-            if (playerBind && !player->m_InstanceValid && playerBind->state == groupBind->state && !((DungeonMap*)map)->IsUnloadingBeforeReset())
+            if (playerBind && groupBind && !player->m_InstanceValid && playerBind->state == groupBind->state && !((DungeonMap*)map)->IsUnloadingBeforeReset())
                 player->m_InstanceValid = true;
         }
     }
@@ -925,6 +925,43 @@ void Group::StartLootRoll(Creature* lootTarget, LootMethod method, Loot* loot, u
     }
     else                                            // no looters??
         delete r;
+}
+
+void Group::SendLootStartRollsForPlayer(Player* pPlayer)
+{
+    if (!pPlayer || !pPlayer->GetSession())
+        return;
+
+    for (Rolls::const_iterator itrRoll = RollId.begin(); itrRoll != RollId.end(); ++itrRoll)
+    {
+        Roll* roll = *itrRoll;
+
+        if (!roll->isValid())
+            continue;
+
+        for (Roll::PlayerVote::const_iterator itrVote = roll->playerVote.begin(); itrVote != roll->playerVote.end(); ++itrVote)
+        {
+            if (itrVote->first != pPlayer->GetObjectGuid() || itrVote->second != ROLL_NOT_EMITED_YET)
+                continue;
+
+            uint32 countDown = 0;
+            if (Creature* pCreature = pPlayer->GetMap()->GetCreature(roll->lootedTargetGUID))
+                countDown = pCreature->GetGroupLootTimer();
+
+            if (!countDown)
+                continue;
+
+            WorldPacket data(SMSG_LOOT_START_ROLL, (8 + 4 + 4 + 4 + 4 + 4));
+            data << roll->lootedTargetGUID;                   // creature guid what we're looting
+            data << uint32(roll->itemSlot);                   // item slot in loot
+            data << uint32(roll->itemid);                     // the itemEntryId for the item that shall be rolled for
+            data << uint32(0);                                // randomSuffix - not used ?
+            data << uint32(roll->itemRandomPropId);           // item random property ID
+            data << uint32(countDown);                        // the countdown time to choose "need" or "greed"
+
+            pPlayer->GetSession()->SendPacket(&data);
+        }
+    }
 }
 
 // called when roll timer expires
@@ -1878,7 +1915,7 @@ bool Group::InCombatToInstance(uint32 instanceId)
     for (GroupReference *itr = GetFirstMember(); itr != NULL; itr = itr->next())
     {
         Player *pPlayer = itr->getSource();
-        if (pPlayer->getAttackers().size() && pPlayer->GetInstanceId() == instanceId)
+        if (pPlayer->isInCombat() && pPlayer->GetInstanceId() == instanceId)
             return true;
     }
     return false;
@@ -2058,13 +2095,13 @@ static void RewardGroupAtKill_helper(Player* pGroupGuy, Unit* pVictim, uint32 co
                 Player *pPVictim = (Player *)pVictim;
                 if ((pGroupGuy->GetTeam() == ALLIANCE) && (pPVictim->GetTeam() == HORDE))
                 {
-                    FactionEntry const* factionEntry = sFactionStore.LookupEntry(730);
+                    FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(730);
                     if (factionEntry)
                         pGroupGuy->GetReputationMgr().ModifyReputation(factionEntry, 1);
                 }
                 if ((pGroupGuy->GetTeam() == HORDE) && (pPVictim->GetTeam() == ALLIANCE))
                 {
-                    FactionEntry const* factionEntry = sFactionStore.LookupEntry(729);
+                    FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(729);
                     if (factionEntry)
                         pGroupGuy->GetReputationMgr().ModifyReputation(factionEntry, 1);
                 }

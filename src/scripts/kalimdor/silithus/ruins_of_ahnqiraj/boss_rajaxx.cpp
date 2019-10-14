@@ -128,7 +128,7 @@ struct boss_rajaxxAI : public ScriptedAI
         m_uiNextWave_Timer = 0;
         m_uiNextWaveIndex = 0;
 
-        if (m_pInstance)
+        if (m_pInstance && m_creature->isAlive())
         {
             for (uint8 waveIndex = 0; waveIndex < WAVE_MAX; ++waveIndex)
                 ResetWave(waveIndex);
@@ -138,7 +138,7 @@ struct boss_rajaxxAI : public ScriptedAI
 
     void ResetWave(uint8 waveIndex)
     {
-        if (!m_pInstance)
+        if (!m_pInstance || !m_creature->isAlive())
             return;
         if (waveIndex >= WAVE_MAX)
             return;
@@ -282,7 +282,7 @@ struct boss_rajaxxAI : public ScriptedAI
 
     void OnKillReputationReward()
     {
-        FactionEntry const *factionEntry = sFactionStore.LookupEntry(609); // Cenarion Circle
+        FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(609); // Cenarion Circle
         if (!factionEntry) {
             sLog.outError("Rajaxx justDied, unable to find Cenarion Circle faction");
             return;

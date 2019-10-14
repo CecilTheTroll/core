@@ -147,6 +147,7 @@ Unit::Unit()
     m_invisibilityMask = 0;
     m_transform = 0;
     m_canModifyStats = false;
+    m_modelCollisionHeight = 2.f;
 
     for (int i = 0; i < MAX_SPELL_IMMUNITY; ++i)
         m_spellImmune[i].clear();
@@ -490,6 +491,18 @@ bool Unit::HasAuraTypeByCaster(AuraType auraType, ObjectGuid casterGuid) const
 }
 
 uint64 Unit::GetAuraApplicationMask() const
+{
+    if (!IsInWorld())
+        return 0;
+
+    uint64 mask = 0x0;
+    for (uint64 i = 0; i < MAX_AURAS; ++i)
+        if (GetUInt32Value(UNIT_FIELD_AURA + i))
+            mask |= uint64(1) << i;
+    return mask;
+}
+
+uint64 Unit::GetNegativeAuraApplicationMask() const
 {
     if (!IsInWorld())
         return 0;
@@ -1099,16 +1112,20 @@ void Unit::Kill(Unit* pVictim, SpellEntry const *spellProto, bool durabilityLoss
                 creature->lootForPickPocketed = false;
 
             loot->clear();
-            if (!(creature->AI() && creature->AI()->FillLoot(loot, looter)))
-            {
-                if (uint32 lootid = creature->GetCreatureInfo()->lootid)
-                {
-                    loot->SetTeam(group_tap ? group_tap->GetTeam() : looter->GetTeam());
-                    loot->FillLoot(lootid, LootTemplates_Creature, looter, false, false, creature);
-                }
-            }
 
-            loot->generateMoneyLoot(creature->GetCreatureInfo()->mingold, creature->GetCreatureInfo()->maxgold);
+            if (creature->CanHaveLoot(looter))
+            {
+                if (!(creature->AI() && creature->AI()->FillLoot(loot, looter)))
+                {
+                    if (uint32 lootid = creature->GetCreatureInfo()->lootid)
+                    {
+                        loot->SetTeam(group_tap ? group_tap->GetTeam() : looter->GetTeam());
+                        loot->FillLoot(lootid, LootTemplates_Creature, looter, false, false, creature);
+                    }
+                }
+
+                loot->generateMoneyLoot(creature->GetCreatureInfo()->mingold, creature->GetCreatureInfo()->maxgold);
+            }
         }
 
         if (group_tap)
@@ -2753,6 +2770,9 @@ uint32 Unit::CalculateDamage(WeaponAttackType attType, bool normalized, uint8 in
         }
     }
 
+    if (min_damage < 0) min_damage = 0.0f;
+    if (max_damage < 0) max_damage = 0.0f;
+
     if (min_damage > max_damage)
         std::swap(min_damage, max_damage);
 
@@ -2848,14 +2868,12 @@ float Unit::MeleeSpellMissChance(Unit *pVictim, WeaponAttackType attType, int32 
     float hitChance = 0.0f;
 
     // PvP - PvE melee chances
-    if (GetTypeId() == TYPEID_PLAYER && pVictim->GetTypeId() == TYPEID_PLAYER)
-        hitChance = 95.0f + skillDiff * 0.04f;  // PvP misschance base is 5.00%
-    else if (pVictim->GetTypeId() == TYPEID_PLAYER)
-        hitChance = 94.4f + skillDiff * 0.04f;
+    if (pVictim->GetTypeId() == TYPEID_PLAYER)
+        hitChance = 95.0f + skillDiff * 0.04f;
     else if (skillDiff < -10)
-        hitChance = 93.4f + (skillDiff + 10) * 0.4f;        // 7% ~ 6.60% base chance to miss for big skill diff
+        hitChance = 93.0f + (skillDiff + 10) * 0.4f;        // 7% base chance to miss for big skill diff
     else
-        hitChance = 94.4f + skillDiff * 0.1f;
+        hitChance = 95.0f + skillDiff * 0.1f;
 
     // Hit chance depends from victim auras
     if (attType == RANGED_ATTACK)
@@ -3182,13 +3200,8 @@ float Unit::MeleeMissChanceCalc(const Unit *pVictim, WeaponAttackType attType) c
     if (!pVictim || !pVictim->IsStandState())
         return 0.0f;
 
-    float missChance = 5.60f; // The base chance to miss is 5.60%
-
-    // The base chance to miss in PvP is 5%
-    if (GetTypeId() == TYPEID_PLAYER && pVictim->GetTypeId() == TYPEID_PLAYER)
-    {
-        missChance = 5.00f;
-    }
+    // Base misschance 5%
+    float missChance = 5.0f;
 
     // DualWield - white damage has an additional 19% miss penalty
     if (haveOffhandWeapon() && attType != RANGED_ATTACK)
@@ -3212,9 +3225,9 @@ float Unit::MeleeMissChanceCalc(const Unit *pVictim, WeaponAttackType attType) c
     if (pVictim->GetTypeId() == TYPEID_PLAYER)
         missChance -= skillDiff * 0.04f;
     else if (skillDiff < -10)
-        missChance -= (skillDiff + 10) * 0.4f - 1.0f;       // 7% ~ 6.60% base chance to miss for big skill diff
+        missChance -= (skillDiff + 10) * 0.4f - 2.0f;       // 7% base chance to miss for big skill diff
     else
-        missChance -=  skillDiff * 0.1f;
+        missChance -= skillDiff * 0.1f;
 
     // Hit chance bonus from attacker based on ratings and auras
     if (attType == RANGED_ATTACK)
@@ -4342,6 +4355,11 @@ bool Unit::RemoveNoStackAurasDueToAuraHolder(SpellAuraHolder *holder)
 
         if (is_spellSpecPerTarget || (is_spellSpecPerTargetPerCaster && holder->GetCasterGuid() == (*i).second->GetCasterGuid()))
         {
+            // cannot remove stronger snare / haste debuff
+            if (spellId_spec == SPELL_SNARE || spellId_spec == SPELL_NEGATIVE_HASTE)
+                if (!CompareSpellSpecificAuras(spellProto, i_spellProto))
+                    return false;
+
             // cannot remove higher rank
             if (sSpellMgr.IsRankSpellDueToSpell(spellProto, i_spellId))
                 if (CompareAuraRanks(spellId, i_spellId) < 0)
@@ -5246,7 +5264,7 @@ typedef std::list<RemovedSpellData> RemoveSpellList;
 
 void Unit::ProcDamageAndSpell(Unit *pVictim, uint32 procAttacker, uint32 procVictim, uint32 procExtra, uint32 amount, WeaponAttackType attType, SpellEntry const *procSpell, Spell* spell)
 {
-    if (!IsInWorld())
+    if ((pVictim && !IsInMap(pVictim)) || !IsInWorld())
         return;
 
     ProcTriggeredList procTriggered;
@@ -5322,6 +5340,10 @@ void Unit::HandleTriggers(Unit *pVictim, uint32 procExtra, uint32 amount, SpellE
                 else if (!triggeredByAura->CanProcFrom(procSpell, PROC_EX_NONE, procExtra, amount != 0, true))
                     continue;
             }
+
+            // Spells that require target to be below 20%, like Deadly Swiftness (31255).
+            if ((triggeredByAura->GetSpellProto()->TargetAuraState == AURA_STATE_HEALTHLESS_20_PERCENT) && (!itr->target || !itr->target->HasAuraState(AURA_STATE_HEALTHLESS_20_PERCENT)))
+                continue;
 
             SpellAuraProcResult procResult = (*caster.*AuraProcHandler[auraModifier->m_auraname])(itr->target, amount, triggeredByAura, procSpell, itr->procFlag, procExtra, cooldown);
             switch (procResult)
@@ -5504,7 +5526,7 @@ void Unit::setPowerType(Powers new_powertype)
 
 FactionTemplateEntry const* Unit::getFactionTemplateEntry() const
 {
-    FactionTemplateEntry const* entry = sFactionTemplateStore.LookupEntry(getFaction());
+    FactionTemplateEntry const* entry = sObjectMgr.GetFactionTemplateEntry(getFaction());
     if (!entry)
     {
         static ObjectGuid guid;                             // prevent repeating spam same faction problem
@@ -5592,7 +5614,7 @@ ReputationRank Unit::GetReactionTo(Unit const* target) const
             {
                 if (ReputationRank const* repRank = selfPlayerOwner->GetReputationMgr().GetForcedRankIfAny(targetFactionTemplateEntry))
                     return *repRank;
-                if (FactionEntry const* targetFactionEntry = sFactionStore.LookupEntry(targetFactionTemplateEntry->faction))
+                if (FactionEntry const* targetFactionEntry = sObjectMgr.GetFactionEntry(targetFactionTemplateEntry->faction))
                 {
                     if (targetFactionEntry->CanHaveReputation())
                     {
@@ -5633,7 +5655,7 @@ ReputationRank Unit::GetFactionReactionTo(FactionTemplateEntry const* factionTem
             return REP_HOSTILE;
         if (ReputationRank const* repRank = targetPlayerOwner->GetReputationMgr().GetForcedRankIfAny(factionTemplateEntry))
             return *repRank;
-        if (FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionTemplateEntry->faction))
+        if (FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(factionTemplateEntry->faction))
         {
             if (factionEntry->CanHaveReputation())
             {
@@ -5676,7 +5698,7 @@ bool Unit::IsHostileToPlayers() const
     if (!my_faction || !my_faction->faction)
         return false;
 
-    FactionEntry const* raw_faction = sFactionStore.LookupEntry(my_faction->faction);
+    FactionEntry const* raw_faction = sObjectMgr.GetFactionEntry(my_faction->faction);
     if (raw_faction && raw_faction->reputationListID >= 0)
         return false;
 
@@ -5689,7 +5711,7 @@ bool Unit::IsNeutralToAll() const
     if (!my_faction || !my_faction->faction)
         return true;
 
-    FactionEntry const* raw_faction = sFactionStore.LookupEntry(my_faction->faction);
+    FactionEntry const* raw_faction = sObjectMgr.GetFactionEntry(my_faction->faction);
     if (raw_faction && raw_faction->reputationListID >= 0)
         return false;
 
@@ -5841,6 +5863,9 @@ void Unit::CombatStop(bool includingCast)
     AttackStop();
     RemoveAllAttackers();
 
+    if (AI() && isInCombat())
+        AI()->OnCombatStop();
+
     if (GetTypeId() == TYPEID_PLAYER)
         ((Player*)this)->SendAttackSwingCancelAttack();     // melee and ranged forced attack cancel
     else if (GetTypeId() == TYPEID_UNIT)
@@ -5920,6 +5945,17 @@ void Unit::ModifyAuraState(AuraState flag, bool apply)
                         CastSpell(this, itr->first, true, nullptr);
                 }
             }
+            else 
+            {
+                switch (flag) 
+                {
+                    case AURA_STATE_HEALTHLESS_15_PERCENT:
+                    case AURA_STATE_HEALTHLESS_10_PERCENT:
+                    case AURA_STATE_HEALTHLESS_5_PERCENT:
+                        UpdateSpeed(MOVE_RUN, true);
+                        break;
+                }
+            }
         }
     }
     else
@@ -5939,6 +5975,17 @@ void Unit::ModifyAuraState(AuraState flag, bool apply)
                 }
                 else
                     ++itr;
+            }
+            if (GetTypeId() == TYPEID_UNIT)
+            {
+                switch (flag) 
+                {
+                    case AURA_STATE_HEALTHLESS_15_PERCENT:
+                    case AURA_STATE_HEALTHLESS_10_PERCENT:
+                    case AURA_STATE_HEALTHLESS_5_PERCENT:
+                        UpdateSpeed(MOVE_RUN, true);
+                        break;
+                }
             }
         }
     }
@@ -6154,6 +6201,14 @@ void Unit::RemoveGuardians()
             pet->Unsummon(PET_SAVE_AS_DELETED, this); // can remove pet guid from m_guardianPets
 
         m_guardianPets.erase(guid);
+    }
+}
+
+void Unit::RemoveGuardiansWithEntry(uint32 entry)
+{
+    while (Pet* pGuardian = FindGuardianWithEntry(entry))
+    {
+        pGuardian->Unsummon(PET_SAVE_AS_DELETED, this);
     }
 }
 
@@ -6916,7 +6971,7 @@ bool Unit::IsImmuneToDamage(SpellSchoolMask shoolMask, SpellEntry const* spellIn
         if (itr->type & shoolMask)
             return true;
 
-    if (spellInfo && spellInfo->Attributes & SPELL_ATTR_EX_UNAFFECTED_BY_SCHOOL_IMMUNE)
+    if (spellInfo && spellInfo->AttributesEx & SPELL_ATTR_EX_UNAFFECTED_BY_SCHOOL_IMMUNE)
         return false;
 
     // If m_immuneToSchool type contain this school type, IMMUNE damage.
@@ -6958,18 +7013,16 @@ bool Unit::IsImmuneToSpell(SpellEntry const *spellInfo, bool /*castOnSelf*/)
         for (SpellImmuneList::const_iterator itr = mechanicList.begin(); itr != mechanicList.end(); ++itr)
         {
             if (itr->type == mechanic)
-            {
-                // always remove Fear Ward on fear immunity event, even if the unit has another fear immunity aura like Berserker Rage
-                if (mechanic == MECHANIC_FEAR)
-                    RemoveAurasDueToSpell(6346);
                 return true;
-            }
         }
 
+        uint32 mask = 1 << (mechanic - 1);
         AuraList const& immuneAuraApply = GetAurasByType(SPELL_AURA_MECHANIC_IMMUNITY_MASK);
         for (AuraList::const_iterator iter = immuneAuraApply.begin(); iter != immuneAuraApply.end(); ++iter)
-            if ((*iter)->GetModifier()->m_miscvalue & (1 << (mechanic - 1)))
+        {
+            if ((*iter)->GetModifier()->m_miscvalue & mask)
                 return true;
+        }
     }
 
     return false;
@@ -7236,16 +7289,6 @@ void Unit::ApplySpellImmune(uint32 spellId, uint32 op, uint32 type, bool apply)
 {
     if (apply)
     {
-        for (SpellImmuneList::iterator itr = m_spellImmune[op].begin(), next; itr != m_spellImmune[op].end(); itr = next)
-        {
-            next = itr;
-            ++next;
-            if (itr->type == type)
-            {
-                m_spellImmune[op].erase(itr);
-                next = m_spellImmune[op].begin();
-            }
-        }
         SpellImmune Immune;
         Immune.spellId = spellId;
         Immune.type = type;
@@ -7255,7 +7298,7 @@ void Unit::ApplySpellImmune(uint32 spellId, uint32 op, uint32 type, bool apply)
     {
         for (SpellImmuneList::iterator itr = m_spellImmune[op].begin(); itr != m_spellImmune[op].end(); ++itr)
         {
-            if (itr->spellId == spellId)
+            if (itr->spellId == spellId && itr->type == type)
             {
                 m_spellImmune[op].erase(itr);
                 break;
@@ -7301,12 +7344,36 @@ void Unit::Mount(uint32 mount, uint32 spellId)
 
 void Unit::Unmount(bool from_aura)
 {
-    if (!IsMounted())
-        return;
-
     RemoveAurasWithInterruptFlags(AURA_INTERRUPT_FLAG_NOT_MOUNTED);
 
     SetUInt32Value(UNIT_FIELD_MOUNTDISPLAYID, 0);
+}
+
+bool Unit::IsInDisallowedMountForm() const
+{
+    ShapeshiftForm form = GetShapeshiftForm();
+    if (form != FORM_NONE && form != FORM_BATTLESTANCE && form != FORM_BERSERKERSTANCE && form != FORM_DEFENSIVESTANCE && form != FORM_SHADOW && form != FORM_STEALTH)
+        return true;
+
+    if (GetDisplayId() == GetNativeDisplayId())
+        return false;
+
+    CreatureDisplayInfoEntry const* display = sCreatureDisplayInfoStore.LookupEntry(GetDisplayId());
+    if (!display)
+        return true;
+
+    CreatureDisplayInfoExtraEntry const* displayExtra = sCreatureDisplayInfoExtraStore.LookupEntry(display->ExtendedDisplayInfoID);
+    if (!displayExtra)
+        return true;
+
+    CreatureModelDataEntry const* model = sCreatureModelDataStore.LookupEntry(display->ModelId);
+    ChrRacesEntry const* race = sChrRacesStore.LookupEntry(displayExtra->Race);
+
+    if (model && !(model->flags & 0x80))
+        if (race && !(race->Flags & 0x4))
+            return true;
+
+    return false;
 }
 
 void Unit::SetInCombatWith(Unit* enemy)
@@ -7482,7 +7549,7 @@ bool Unit::_IsValidAttackTarget(Unit const* target, SpellEntry const* bySpell, W
             if (FactionTemplateEntry const* factionTemplate = creature->getFactionTemplateEntry())
             {
                 if (!(player->GetReputationMgr().GetForcedRankIfAny(factionTemplate)))
-                    if (FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionTemplate->faction))
+                    if (FactionEntry const* factionEntry = sObjectMgr.GetFactionEntry(factionTemplate->faction))
                         if (FactionState const* repState = player->GetReputationMgr().GetState(factionEntry))
                             if (!(repState->Flags & FACTION_FLAG_AT_WAR))
                                 return false;
@@ -7931,14 +7998,8 @@ void Unit::UpdateSpeed(UnitMoveType mtype, bool forced, float ratio)
             break;
     }
 
-    // for creature case, we check explicit if mob searched for assistance
-    if (GetTypeId() == TYPEID_UNIT)
-    {
-        if (((Creature*)this)->HasSearchedAssistance())
-            speed *= 0.66f;                                 // best guessed value, so this will be 33% reduction. Based off initial speed, mob can then "run", "walk fast" or "walk".
-    }
     // for player case, we look for some custom rates
-    else
+    if (GetTypeId() == TYPEID_PLAYER)
     {
         if (getDeathState() == CORPSE)
             speed *= sWorld.getConfig(((Player*)this)->InBattleGround() ? CONFIG_FLOAT_GHOST_RUN_SPEED_BG : CONFIG_FLOAT_GHOST_RUN_SPEED_WORLD);
@@ -7951,8 +8012,10 @@ void Unit::UpdateSpeed(UnitMoveType mtype, bool forced, float ratio)
 
     if (GetTypeId() == TYPEID_UNIT)
     {
+        // Before patch 1.9 pets should retain their wild speed, after that they are normalised
         Creature* pCreature = (Creature*)this;
-        if (!(pCreature->IsPet() && pCreature->GetOwnerGuid().IsPlayer()))      // don't use DB values for player controlled pets
+        if (!(pCreature->IsPet() && pCreature->GetOwnerGuid().IsPlayer()) || 
+            (sWorld.GetWowPatch() < WOW_PATCH_109 && sWorld.getConfig(CONFIG_BOOL_ACCURATE_PETS)))
         {
             switch (mtype)
             {
@@ -7968,6 +8031,17 @@ void Unit::UpdateSpeed(UnitMoveType mtype, bool forced, float ratio)
         }
         else
             speed *= 1.14286f;  // normalized player pet runspeed
+
+        // Speed reduction at low health percentages
+        if (!pCreature->IsPet() && !pCreature->IsWorldBoss())
+        {
+            if (HasAuraState(AURA_STATE_HEALTHLESS_5_PERCENT))
+                speed *= SPEED_REDUCTION_HP_5;
+            else if (HasAuraState(AURA_STATE_HEALTHLESS_10_PERCENT))
+                speed *= SPEED_REDUCTION_HP_10;
+            else if (HasAuraState(AURA_STATE_HEALTHLESS_15_PERCENT))
+                speed *= SPEED_REDUCTION_HP_15;
+        }
     }
 
     SetSpeedRate(mtype, speed * ratio, forced);
@@ -8104,6 +8178,9 @@ void Unit::SetDeathState(DeathState s)
         StopMoving(true);
 
         ModifyAuraState(AURA_STATE_HEALTHLESS_20_PERCENT, false);
+        ModifyAuraState(AURA_STATE_HEALTHLESS_15_PERCENT, false);
+        ModifyAuraState(AURA_STATE_HEALTHLESS_10_PERCENT, false);
+        ModifyAuraState(AURA_STATE_HEALTHLESS_5_PERCENT, false);
         // remove aurastates allowing special moves
         ClearAllReactives();
         ClearDiminishings();
@@ -8175,7 +8252,7 @@ float Unit::ApplyTotalThreatModifier(float threat, SpellSchoolMask schoolMask)
 void Unit::AddThreat(Unit* pVictim, float threat /*= 0.0f*/, bool crit /*= false*/, SpellSchoolMask schoolMask /*= SPELL_SCHOOL_MASK_NONE*/, SpellEntry const *threatSpell /*= NULL*/)
 {
     // Only mobs can manage threat lists
-    if (CanHaveThreatList())
+    if (CanHaveThreatList() && IsInMap(pVictim))
         m_ThreatManager.addThreat(pVictim, threat, crit, schoolMask, threatSpell, false);
 }
 
@@ -9840,6 +9917,12 @@ void Unit::UpdateModelData()
             SetFloatValue(UNIT_FIELD_COMBATREACH, 1.5f);
         else
             SetFloatValue(UNIT_FIELD_COMBATREACH, (GetObjectScale() / displayEntry->scale) * modelInfo->combat_reach);
+
+        if (CreatureModelDataEntry const* modelData = sCreatureModelDataStore.LookupEntry(displayEntry->ModelId))
+            if (modelData->collisionHeight > 0.f && modelData->modelScale > 0.f)
+                m_modelCollisionHeight = modelData->collisionHeight / modelData->modelScale;
+            else
+                m_modelCollisionHeight = 2.f;
     }
     else
     {
@@ -9955,7 +10038,7 @@ Unit* Unit::SelectRandomUnfriendlyTarget(Unit* except /*= NULL*/, float radius /
     return *tcIter;
 }
 
-Unit* Unit::SelectRandomFriendlyTarget(Unit* except /*= NULL*/, float radius /*= ATTACK_DISTANCE*/) const
+Unit* Unit::SelectRandomFriendlyTarget(Unit* except /*= NULL*/, float radius /*= ATTACK_DISTANCE*/, bool inCombat) const
 {
     std::list<Unit *> targets;
 
@@ -9968,13 +10051,10 @@ Unit* Unit::SelectRandomFriendlyTarget(Unit* except /*= NULL*/, float radius /*=
     if (except)
         targets.remove(except);
 
-    // remove self
-    targets.remove((Unit *) this);
-
     // remove not LoS targets
     for (std::list<Unit *>::iterator tIter = targets.begin(); tIter != targets.end();)
     {
-        if (!IsWithinLOSInMap(*tIter))
+        if (!IsWithinLOSInMap(*tIter) || (inCombat && !(*tIter)->isInCombat()))
         {
             std::list<Unit *>::iterator tIter2 = tIter;
             ++tIter;
@@ -10272,16 +10352,14 @@ void Unit::TeleportPositionRelocation(float x, float y, float z, float orientati
     }
 }
 
-void Unit::MonsterMoveWithSpeed(float x, float y, float z, float speed, bool generatePath, bool forceDestination)
+void Unit::MonsterMoveWithSpeed(float x, float y, float z, float o, float speed, uint32 options)
 {
-    uint32 options = 0;
-    if (generatePath)
-        options |= MOVE_PATHFINDING;
-    if (forceDestination)
-        options |= MOVE_FORCE_DESTINATION;
     Movement::MoveSplineInit init(*this, "MonsterMoveWithSpeed");
     init.MoveTo(x, y, z, options);
-    init.SetVelocity(speed);
+    if (speed > 0.0f)
+        init.SetVelocity(speed);
+    if (o > -7.0f)
+        init.SetFacing(o);
     init.Launch();
 }
 
@@ -11160,7 +11238,7 @@ void Unit::UpdateSplineMovement(uint32 t_diff)
 
 void Unit::MonsterMove(float x, float y, float z)
 {
-    MonsterMoveWithSpeed(x, y, z, GetSpeed(MOVE_RUN));
+    MonsterMoveWithSpeed(x, y, z, -10.0f, GetSpeed(MOVE_RUN), 0u);
 }
 
 

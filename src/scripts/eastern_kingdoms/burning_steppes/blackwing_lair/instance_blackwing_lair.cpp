@@ -271,9 +271,11 @@ struct instance_blackwing_lair : public ScriptedInstance
         m_auiData[DATA_NEF_COLOR] = urand(0, 19);
     }
 
-    bool IsEncounterInProgress() const
+    bool IsEncounterInProgress() const override
     {
-        for (int i = 0; i < MAX_ENCOUNTER; i++)
+        // Don't include TYPE_SCEPTER_RUN status in encounter progress check
+        // TODO: Move scepter run out of encounter ordering
+        for (int i = 0; i < TYPE_VAEL_EVENT; i++)
         {
             if (m_auiEncounter[i] == IN_PROGRESS)
                 return true;
@@ -756,7 +758,7 @@ struct instance_blackwing_lair : public ScriptedInstance
                         {
                             bYelled = true;
                         }
-                        pCreature->MonsterMoveWithSpeed(-7608.0f, -888.0f, 432.0f, pCreature->GetSpeed(MOVE_RUN), true);
+                        pCreature->MonsterMoveWithSpeed(-7608.0f, -888.0f, 432.0f, 10.0f, pCreature->GetSpeed(MOVE_RUN), uint32(MOVE_PATHFINDING));
                     }
                 }
             }

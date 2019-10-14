@@ -89,7 +89,7 @@ bool ChatHandler::HandleDebugSendNextChannelSpellVisualCommand(char *args)
     }
     uint32 id = 0;
     SpellEntry const *spellInfo = NULL;
-    for (id = uiPlayId + 1; id <= sSpellStore.GetNumRows(); id++)
+    for (id = uiPlayId + 1; id <= sSpellMgr.GetMaxSpellId(); id++)
     {
         spellInfo = sSpellMgr.GetSpellEntry(id);
         if (!spellInfo || uiPlayId >= spellInfo->Id || !spellInfo->SpellVisual || !IsChanneledSpell(spellInfo))
@@ -97,7 +97,7 @@ bool ChatHandler::HandleDebugSendNextChannelSpellVisualCommand(char *args)
         else
             break;
     }
-    if (id && id <= sSpellStore.GetNumRows())
+    if (id && id <= sSpellMgr.GetMaxSpellId())
     {
         WorldPacket data(MSG_CHANNEL_START, (4 + 4));
         data << uint32(id);
@@ -107,7 +107,7 @@ bool ChatHandler::HandleDebugSendNextChannelSpellVisualCommand(char *args)
         PSendSysMessage("Playing channel visual of spell %u %s %s", id, spellInfo->SpellName[0], spellInfo->Rank[0]);
         return true;
     }
-    PSendSysMessage("Spell Id range 0 to %u, -1 to stop animation", sSpellStore.GetNumRows());
+    PSendSysMessage("Spell Id range 0 to %u, -1 to stop animation", sSpellMgr.GetMaxSpellId());
     return true;
 }
 
@@ -118,7 +118,7 @@ bool ChatHandler::HandleSendSpellChannelVisualCommand(char *args)
     if (playIdStr)
         uiPlayId = int32(atoi(playIdStr));
 
-    if (uiPlayId && uiPlayId <= sSpellStore.GetNumRows())
+    if (uiPlayId && uiPlayId <= sSpellMgr.GetMaxSpellId())
     {
         WorldPacket data(MSG_CHANNEL_START, (4 + 4));
         data << uint32(uiPlayId);
@@ -138,7 +138,7 @@ bool ChatHandler::HandleSendSpellChannelVisualCommand(char *args)
         PSendSysMessage("Sending channel stop");
         return true;
     }
-    PSendSysMessage("Spell Id range 1 to %u, 0 to stop animation", sSpellStore.GetNumRows());
+    PSendSysMessage("Spell Id range 1 to %u, 0 to stop animation", sSpellMgr.GetMaxSpellId());
     return true;
 }
 
@@ -323,10 +323,15 @@ bool ChatHandler::HandleDebugPlaySoundCommand(char* args)
     // USAGE: .debug playsound #soundid
     // #soundid - ID decimal number from SoundEntries.dbc (1st column)
     uint32 dwSoundId;
-    if (!ExtractUInt32(&args, dwSoundId))
-        return false;
 
-    if (!sSoundEntriesStore.LookupEntry(dwSoundId))
+    if (!ExtractUint32KeyFromLink(&args, "Hsound", dwSoundId))
+    {
+        PSendSysMessage(LANG_SOUND_NOT_EXIST, dwSoundId);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    if (!sObjectMgr.GetSoundEntry(dwSoundId))
     {
         PSendSysMessage(LANG_SOUND_NOT_EXIST, dwSoundId);
         SetSentErrorMessage(true);
@@ -354,10 +359,14 @@ bool ChatHandler::HandleDebugPlayMusicCommand(char* args)
 {
     uint32 dwSoundId;
 
-    if (!ExtractUInt32(&args, dwSoundId))
+    if (!ExtractUint32KeyFromLink(&args, "Hsound", dwSoundId))
+    {
+        PSendSysMessage(LANG_SOUND_NOT_EXIST, dwSoundId);
+        SetSentErrorMessage(true);
         return false;
+    }
 
-    if (!sSoundEntriesStore.LookupEntry(dwSoundId))
+    if (!sObjectMgr.GetSoundEntry(dwSoundId))
     {
         PSendSysMessage(LANG_SOUND_NOT_EXIST, dwSoundId);
         SetSentErrorMessage(true);
@@ -386,23 +395,37 @@ bool ChatHandler::HandleDebugPlayMusicCommand(char* args)
 
 bool ChatHandler::HandleDebugPlayScriptText(char* args)
 {
-    // USAGE: .debug play scripttext #id
-    int32 dwSoundId;
-    if (!ExtractInt32(&args, dwSoundId))
-        return false;
-    if (!sScriptMgr.GetTextData(dwSoundId))
-    {
-        PSendSysMessage(LANG_SOUND_NOT_EXIST, dwSoundId);
-        SetSentErrorMessage(true);
-        return false;
-    }
-    Unit* unit = getSelectedUnit();
-    if (!unit)
-    {
-        unit = m_session->GetPlayer();
-    }
+    int32 textId;
 
-    DoScriptText(dwSoundId, unit);
+    if (!ExtractInt32(&args, textId))
+        return false;
+
+    Unit* pSource = getSelectedUnit();
+    Unit* pTarget = m_session->GetPlayer();
+
+    if (pSource && pTarget)
+        DoScriptText(textId, pSource, pTarget);
+
+    return true;
+}
+
+bool ChatHandler::HandleDebugConditionCommand(char* args)
+{
+    int32 conditionId;
+
+    if (!ExtractInt32(&args, conditionId))
+        return false;
+
+    Unit* pSource = getSelectedUnit();
+    Unit* pTarget = m_session->GetPlayer();
+
+    if (pSource && pTarget)
+    {
+        if (sObjectMgr.IsConditionSatisfied(conditionId, pTarget, pSource->GetMap(), pSource, CONDITION_FROM_DBSCRIPTS))
+            SendSysMessage("Condition is satisfied.");
+        else
+            SendSysMessage("Condition is not satisfied.");
+    }
 
     return true;
 }

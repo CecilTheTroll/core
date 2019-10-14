@@ -41,14 +41,21 @@
 void utf8print(void* arg, const char* str)
 {
 #if PLATFORM == PLATFORM_WINDOWS
-    wchar_t wtemp_buf[6000];
-    size_t wtemp_len = 6000-1;
-    if(!Utf8toWStr(str,strlen(str),wtemp_buf,wtemp_len))
+    std::wstring wtemp_buf;
+    std::string temp_buf(str);
+
+    if(!Utf8toWStr(temp_buf, wtemp_buf, 6000))
         return;
 
-    char temp_buf[6000];
-    CharToOemBuffW(&wtemp_buf[0],&temp_buf[0],wtemp_len+1);
-    printf("%s", temp_buf);
+    // Guarantee null termination
+    if (!temp_buf.empty())
+    {
+        wtemp_buf.push_back('\0');
+        temp_buf.resize(wtemp_buf.size());
+        CharToOemBuffW(&wtemp_buf[0], &temp_buf[0], wtemp_buf.size());
+    }
+
+    printf("%s", temp_buf.c_str());
 #else
     printf("%s", str);
 #endif
@@ -111,7 +118,7 @@ bool ChatHandler::HandleAccountDeleteCommand(char* args)
  */
 bool ChatHandler::GetDeletedCharacterInfoList(DeletedInfoList& foundList, bool useName, std::string searchString)
 {
-    QueryResult* resultChar;
+    QueryResult* resultChar = nullptr;
     if (!searchString.empty())
     {
         if (useName)
@@ -143,15 +150,19 @@ bool ChatHandler::GetDeletedCharacterInfoList(DeletedInfoList& foundList, bool u
 
                 LoginDatabase.escape_string(searchString);
                 QueryResult* result = LoginDatabase.PQuery("SELECT id FROM account WHERE username " _LIKE_ " " _CONCAT2_("'%s'", "'%%'"), searchString.c_str());
-                std::list<uint32> list = {};
-                do
+                std::list<uint32> list;
+                if (result)
                 {
-                    Field* fields = result->Fetch();
-                    uint32 acc_id = fields[0].GetUInt32();
-                    list.push_back(acc_id);
-                } while (result->NextRow());
+                    do
+                    {
+                        Field* fields = result->Fetch();
+                        uint32 acc_id = fields[0].GetUInt32();
+                        list.push_back(acc_id);
+                    } while (result->NextRow());
 
-                delete result;
+                    delete result;
+                }
+
                 if (list.size() < 1)
                     return false;
                 std::stringstream accountStream;

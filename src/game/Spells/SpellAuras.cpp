@@ -264,7 +264,7 @@ Aura::Aura(SpellEntry const* spellproto, SpellEffectIndex eff, int32 *currentBas
     m_applied(false)
 {
     MANGOS_ASSERT(target);
-    MANGOS_ASSERT(spellproto && spellproto == sSpellMgr.GetSpellEntry(spellproto->Id) && "`info` must be pointer to sSpellStore element");
+    MANGOS_ASSERT(spellproto && spellproto == sSpellMgr.GetSpellEntry(spellproto->Id) && "`info` must be pointer to a sSpellMgr element");
     ASSERT(spellproto->EffectApplyAuraName[eff]);
 
     m_currentBasePoints = currentBasePoints ? *currentBasePoints : spellproto->CalculateSimpleValue(eff);
@@ -868,14 +868,14 @@ bool Aura::isAffectedOnSpell(SpellEntry const *spell) const
     if (spell->SpellFamilyName != GetSpellProto()->SpellFamilyName)
         return false;
 
-    ClassFamilyMask mask = sSpellMgr.GetSpellAffectMask(GetId(), GetEffIndex());
+    uint64 mask = sSpellMgr.GetSpellAffectMask(GetId(), GetEffIndex());
     return spell->IsFitToFamilyMask(mask);
 }
 
 bool Aura::CanProcFrom(SpellEntry const *spell, uint32 EventProcEx, uint32 procEx, bool active, bool useClassMask) const
 {
     // Check EffectClassMask (in pre-3.x stored in spell_affect in fact)
-    ClassFamilyMask mask = sSpellMgr.GetSpellAffectMask(GetId(), GetEffIndex());
+    uint64 mask = sSpellMgr.GetSpellAffectMask(GetId(), GetEffIndex());
 
     // Nostalrius: c'est la moindre des choses d'utiliser un peu 'spell_proc_event' non ?
     if (!mask)
@@ -909,7 +909,7 @@ bool Aura::CanProcFrom(SpellEntry const *spell, uint32 EventProcEx, uint32 procE
     {
         // SpellFamilyName check is performed in SpellMgr::IsSpellProcEventCanTriggeredBy and it is done once for whole holder
         // note: SpellFamilyName is not checked if no spell_proc_event is defined
-        return mask.IsFitToFamilyMask(spell->SpellFamilyFlags);
+        return !!(mask & spell->SpellFamilyFlags);
     }
 }
 
@@ -1980,7 +1980,6 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                     return;
                 }
                 case 10848: // Shroud of Death
-                case 22650: // Ghost Visual
                 case 27978: // Shroud of Death
                     if (apply)
                         target->m_AuraFlags |= UNIT_AURAFLAG_ALIVE_INVISIBLE;
@@ -2201,10 +2200,16 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
     switch (form)
     {
     case FORM_CAT:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 892;
+        
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 892;
+            else
+                modelid = 8571;
+        }
         else
-            modelid = 8571;
+            modelid = 892;
         mod = 0.80f;
         break;
     case FORM_TRAVEL:
@@ -2216,20 +2221,20 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
         mod = 0.80f;
         break;
     case FORM_BEAR:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 2281;
+    case FORM_DIREBEAR:
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 2281;
+            else
+                modelid = 2289;
+        }
         else
-            modelid = 2289;
+            modelid = 2281;
         break;
     case FORM_GHOUL:
         if (Player::TeamForRace(target->getRace()) == ALLIANCE)
             modelid = 10045;
-        break;
-    case FORM_DIREBEAR:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 2281;
-        else
-            modelid = 2289;
         break;
     case FORM_CREATUREBEAR:
         modelid = 902;
@@ -2239,10 +2244,15 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
         mod = 0.80f;
         break;
     case FORM_MOONKIN:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 15374;
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 15374;
+            else
+                modelid = 15375;
+        }
         else
-            modelid = 15375;
+            modelid = 15374;
         break;
     case FORM_TREE:
         modelid = 864;
@@ -2784,11 +2794,10 @@ void Aura::HandleFarSight(bool apply, bool /*Real*/)
     if (!caster || caster->GetTypeId() != TYPEID_PLAYER)
         return;
 
-    Camera& camera = ((Player*)caster)->GetCamera();
     if (apply)
-        camera.SetView(GetTarget());
+        caster->ToPlayer()->SetLongSight(this);
     else
-        camera.ResetView();
+        caster->ToPlayer()->SetLongSight();
 }
 
 void Aura::HandleAuraTrackCreatures(bool apply, bool /*Real*/)
@@ -2903,8 +2912,9 @@ void Unit::ModPossess(Unit* target, bool apply, AuraRemoveMode m_removeMode)
         p_caster->PossessSpellInitialize();
 
         if (Creature* pTargetCrea = target->ToCreature())
-            if (pTargetCrea->AI()->SwitchAiAtControl())
-                pTargetCrea->AIM_Initialize();
+            if (!pTargetCrea->hasUnitState(UNIT_STAT_CAN_NOT_REACT))
+                if (pTargetCrea->AI()->SwitchAiAtControl())
+                    pTargetCrea->AIM_Initialize();
 
         if (target->IsPlayer() && !caster->IsPlayer())
                 target->ToPlayer()->SetControlledBy(caster);
@@ -2915,6 +2925,7 @@ void Unit::ModPossess(Unit* target, bool apply, AuraRemoveMode m_removeMode)
         if (target->hasUnitState(UNIT_STAT_STUNNED | UNIT_STAT_PENDING_STUNNED | UNIT_STAT_ROOT | UNIT_STAT_PENDING_ROOT))
             target->SetMovement(MOVE_ROOT);
         target->StopMoving();
+        target->SetWalk(p_caster->IsWalking());
     }
     else
     {
@@ -2953,16 +2964,23 @@ void Unit::ModPossess(Unit* target, bool apply, AuraRemoveMode m_removeMode)
 
         target->RestoreFaction();
         target->CombatStop(true);
-        target->StopMoving(true);
         target->UpdateControl();
+        target->SetWalk(false);
 
         if (Creature* pCreature = target->ToCreature())
         {
-            if (pCreature->AI() && pCreature->AI()->SwitchAiAtControl())
-                pCreature->AIM_Initialize();
+            if (!pCreature->hasUnitState(UNIT_STAT_CAN_NOT_REACT))
+            {
+                target->StopMoving(true);
+                if (pCreature->AI() && pCreature->AI()->SwitchAiAtControl())
+                    pCreature->AIM_Initialize();
 
-            pCreature->AttackedBy(caster);
+                pCreature->AttackedBy(caster);
+            }
         }
+        else
+            target->StopMoving(true);
+
         // cast mind exhaustion on self when the posess possess ends if the creature
         // is death knight understudy (razuvious). 
         // todo: if there is a way to know a possess has ended through scriptAI, fix this.
@@ -3834,16 +3852,6 @@ void Aura::HandleModMechanicImmunity(bool apply, bool /*Real*/)
         return;
 
     target->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, misc, apply);
-
-    // re-apply Fear Ward if it was not wasted during Bersereker Rage
-    if (!apply && GetSpellProto()->IsFitToFamily<SPELLFAMILY_WARRIOR, CF_WARRIOR_BERSERKER_RAGE>())
-    {
-        if (target->HasAura(6346))
-        {
-            auto aura = target->GetAura(6346, EFFECT_INDEX_0);
-            aura->HandleModMechanicImmunity(true, true);
-        }
-    }
 }
 
 void Aura::HandleModMechanicImmunityMask(bool apply, bool /*Real*/)
@@ -4551,19 +4559,28 @@ void Aura::HandleAuraModIncreaseEnergy(bool apply, bool /*Real*/)
 
 void Aura::HandleAuraModIncreaseEnergyPercent(bool apply, bool /*Real*/)
 {
+    Unit *target = GetTarget();
     Powers powerType = Powers(m_modifier.m_miscvalue);
+    float powerPercent = target->GetPowerPercent(powerType);
 
     UnitMods unitMod = UnitMods(UNIT_MOD_POWER_START + powerType);
+    target->HandleStatModifier(unitMod, TOTAL_PCT, float(m_modifier.m_amount), apply);
 
-    GetTarget()->HandleStatModifier(unitMod, TOTAL_PCT, float(m_modifier.m_amount), apply);
+    if (target->isAlive())
+        target->SetPower(powerType, target->GetMaxPower(powerType) * powerPercent / 100.0f);
 }
 
 void Aura::HandleAuraModIncreaseHealthPercent(bool apply, bool /*Real*/)
 {
-    GetTarget()->HandleStatModifier(UNIT_MOD_HEALTH, TOTAL_PCT, float(m_modifier.m_amount), apply);
+    Unit *target = GetTarget();
+    float healthPercent = target->GetHealthPercent();
+    target->HandleStatModifier(UNIT_MOD_HEALTH, TOTAL_PCT, float(m_modifier.m_amount), apply);
 
-    if (GetTarget()->GetMaxHealth() == 1)
-        GetTarget()->DoKillUnit(GetTarget());
+    if (target->isAlive())
+        target->SetHealthPercent(healthPercent);
+
+    if (target->GetMaxHealth() == 1)
+        target->DoKillUnit(target);
 }
 
 /********************************/
@@ -4694,6 +4711,14 @@ void Aura::HandleModAttackSpeed(bool apply, bool /*Real*/)
     target->ApplyAttackTimePercentMod(BASE_ATTACK, float(m_modifier.m_amount), apply);
     target->ApplyAttackTimePercentMod(OFF_ATTACK, float(m_modifier.m_amount), apply);
     target->ApplyAttackTimePercentMod(RANGED_ATTACK, float(m_modifier.m_amount), apply);
+
+    // Seal of the Crusader damage reduction
+    // SoC increases attack speed but reduces damage to maintain the same DPS
+    if (GetSpellProto()->IsFitToFamily<SPELLFAMILY_PALADIN, CF_PALADIN_SEAL_OF_THE_CRUSADER>())
+    {
+        float reduction = (-100.0f * m_modifier.m_amount) / (m_modifier.m_amount + 100.0f);
+        target->HandleStatModifier(UNIT_MOD_DAMAGE_MAINHAND, TOTAL_PCT, reduction, apply);
+    }
 }
 
 void Aura::HandleModMeleeSpeedPct(bool apply, bool /*Real*/)
@@ -5302,6 +5327,10 @@ void Aura::PeriodicTick(SpellEntry const* sProto, AuraType auraType, uint32 data
                     pdamage = uint32(target->GetMaxHealth() * amount / 100);
             }
 
+            // Consecration: recalculate the damage on each tick
+            if (spellProto->IsFitToFamily<SPELLFAMILY_PALADIN, CF_PALADIN_CONSECRATION>())
+                pdamage = pCaster->SpellDamageBonusDone(target, GetSpellProto(), m_currentBasePoints, DOT, GetStackAmount());
+
             // SpellDamageBonus for magic spells
             if (spellProto->DmgClass == SPELL_DAMAGE_CLASS_NONE || spellProto->DmgClass == SPELL_DAMAGE_CLASS_MAGIC)
                 pdamage = target->SpellDamageBonusTaken(pCaster, spellProto, pdamage, DOT, GetStackAmount());
@@ -5821,8 +5850,14 @@ void Aura::PeriodicDummyTick()
                         target->CastSpell(target, m_modifier.m_amount, true, nullptr, this);
                     return;
                 case 24596:                                 // Intoxicating Venom
-                    if (target->isInCombat() && urand(0, 99) < 7)
-                        target->AddAura(8379); // Disarm
+                    if (target->isInCombat())
+                    {
+                        uint32 rand = urand(0, 99);
+                        if (rand < 7)
+                            target->CastSpell(target, 8379, true, nullptr, this);     // Disarm
+                        else if (rand < 14)
+                            target->CastSpell(target, 6869, true, nullptr, this);     // Fall Down
+                    }
                     return;
             }
             break;
@@ -5898,7 +5933,7 @@ SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit *target, Wor
     m_spellTriggered(false), m_AuraDRLevel(DIMINISHING_LEVEL_1)
 {
     MANGOS_ASSERT(target);
-    MANGOS_ASSERT(spellproto && spellproto == sSpellMgr.GetSpellEntry(spellproto->Id) && "`info` must be pointer to sSpellStore element");
+    MANGOS_ASSERT(spellproto && spellproto == sSpellMgr.GetSpellEntry(spellproto->Id) && "`info` must be pointer to a sSpellMgr element");
 
     if (!caster)
         m_casterGuid = target->GetObjectGuid();
@@ -6114,7 +6149,7 @@ void SpellAuraHolder::_RemoveSpellAuraHolder()
         // Update target aura state flag (at last aura remove)
         //*****************************************************
         uint32 removeState = 0;
-        ClassFamilyMask removeFamilyFlag = m_spellProto->SpellFamilyFlags;
+        uint64 removeFamilyFlag = m_spellProto->SpellFamilyFlags;
         switch (m_spellProto->SpellFamilyName)
         {
             case SPELLFAMILY_PALADIN:
@@ -7122,6 +7157,13 @@ bool _IsExclusiveSpellAura(SpellEntry const* spellproto, SpellEffectIndex eff, A
         case 24427: // Diamond Flask
         case 17528: // Mighty Rage Potion
         case 23697: // Alterac Spring Water
+        // Love is in the Air buffs
+        case 27664:
+        case 27665:
+        case 27666:
+        case 27669:
+        case 27670:
+        case 27671:
             return false;
 
         case 17538: // Le +crit du buff de l'Elixir de la Mangouste 17538, devrait se stack avec TOUT.
@@ -7194,6 +7236,12 @@ bool _IsExclusiveSpellAura(SpellEntry const* spellproto, SpellEffectIndex eff, A
                     spellproto->SpellFamilyName == SPELLFAMILY_PRIEST)
                 return false;
             return true;
+        case SPELL_AURA_MOD_MELEE_HASTE:
+        case SPELL_AURA_MOD_DECREASE_SPEED:
+            // Attack and movement speed reduction
+            if (spellproto->EffectBasePoints[eff] >= 0)
+                return false;
+            return true;
         default:
             return false;
     }
@@ -7203,7 +7251,7 @@ void Aura::ComputeExclusive()
 {
     m_exclusive = false;
     //return;
-    if (GetHolder()->IsPassive() || !GetHolder()->IsPositive())
+    if (GetHolder()->IsPassive())
         return;
     m_exclusive = _IsExclusiveSpellAura(GetSpellProto(), GetEffIndex(), GetModifier()->m_auraname);
 }
@@ -7225,8 +7273,11 @@ int Aura::CheckExclusiveWith(Aura const* other) const
         return 0;
 
     // Lui est mieux
-    if (other->GetModifier()->m_amount > GetModifier()->m_amount)
+    if (other->GetModifier()->m_amount > GetModifier()->m_amount && GetModifier()->m_amount >= 0)
         return 2;
+    else if (other->GetModifier()->m_amount < GetModifier()->m_amount && GetModifier()->m_amount < 0)
+        return 2;
+    
     return 1;
 }
 

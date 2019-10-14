@@ -70,6 +70,18 @@ struct boss_huhuranAI : public ScriptedAI
         ScriptedAI::MoveInLineOfSight(pWho);
     }
 
+    void Aggro(Unit* /*pWho*/) override
+    {
+        if (m_pInstance)
+            m_pInstance->SetData(TYPE_HUHURAN, IN_PROGRESS);
+    }
+
+    void JustReachedHome() override
+    {
+        if (m_pInstance)
+            m_pInstance->SetData(TYPE_HUHURAN, FAIL);
+    }
+
     void JustDied(Unit*) override
     {
         if (m_pInstance)
@@ -134,7 +146,7 @@ struct boss_huhuranAI : public ScriptedAI
             m_uiNoxiousPoisonTimer -= uiDiff;
 
         if (m_bBerserk)
-            DoCastSpellIfCan(m_creature, SPELL_BERSERK, CAST_AURA_NOT_PRESENT);
+            DoCastSpellIfCan(m_creature, SPELL_BERSERK, CF_AURA_NOT_PRESENT);
         else if (m_creature->GetHealthPercent() < 31.0f || m_uiBerserkTimer < uiDiff)
         {
             DoScriptText(EMOTE_GENERIC_BERSERK, m_creature);

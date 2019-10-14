@@ -122,10 +122,6 @@ struct SpellModifier
         : op(_op), type(_type), charges(_charges), value(_value), mask(_mask), spellId(_spellId), ownerAura(NULL)
     {}
 
-    SpellModifier(SpellModOp _op, SpellModType _type, int32 _value, uint32 _spellId, ClassFamilyMask _mask, int16 _charges = 0)
-        : op(_op), type(_type), charges(_charges), value(_value), mask(_mask), spellId(_spellId), ownerAura(NULL)
-    {}
-
     SpellModifier(SpellModOp _op, SpellModType _type, int32 _value, SpellEntry const* spellEntry, SpellEffectIndex eff, int16 _charges = 0);
 
     SpellModifier(SpellModOp _op, SpellModType _type, int32 _value, Aura* aura, int16 _charges = 0);
@@ -136,7 +132,7 @@ struct SpellModifier
     SpellModType type : 8;
     int16 charges     : 16; // 0 = infini, negatif = plus de charge.
     int32 value;
-    ClassFamilyMask mask;
+    uint64 mask;
     uint32 spellId;
     Aura* ownerAura;
 };
@@ -1185,7 +1181,7 @@ class MANGOS_DLL_SPEC Player final: public Unit
         Item* GetItemFromBuyBackSlot( uint32 slot );
         void RemoveItemFromBuyBackSlot( uint32 slot, bool del );
 
-        uint32 GetMaxKeyringSize() const { return KEYRING_SLOT_END-KEYRING_SLOT_START; }
+        uint32 GetMaxKeyringSize() const { return getLevel() < 40 ? 4 : (getLevel() < 50 ? 8 : 12); }
         void SendEquipError( InventoryResult msg, Item* pItem, Item *pItem2 = NULL, uint32 itemid = 0 ) const;
         void SendBuyError( BuyResult msg, Creature* pCreature, uint32 item, uint32 param );
         void SendSellError( SellResult msg, Creature* pCreature, ObjectGuid itemGuid, uint32 param );
@@ -1578,8 +1574,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         uint32 GetSpellByProto(ItemPrototype *proto);
 
-        float GetHealthBonusFromStamina();
-        float GetManaBonusFromIntellect();
+        float GetHealthBonusFromStamina(float stamina);
+        float GetManaBonusFromIntellect(float intellect);
 
         bool UpdateStats(Stats stat);
         bool UpdateAllStats();
@@ -1705,6 +1701,13 @@ class MANGOS_DLL_SPEC Player final: public Unit
         void SetSemaphoreTeleportFar(bool semphsetting);
         void SetPendingFarTeleport(bool pending) { mPendingFarTeleport = pending; }
         void ProcessDelayedOperations();
+
+        bool IsHasDelayedTeleport() const
+        {
+            // we should not execute delayed teleports for now dead players but has been alive at teleport
+            // because we don't want player's ghost teleported from graveyard
+            return m_bHasDelayedTeleport && (isAlive() || !m_bHasBeenAliveAtDelayedTeleport);
+        }
 
         void CheckAreaExploreAndOutdoor(void);
 
@@ -2034,6 +2037,10 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         Camera& GetCamera() { return m_camera; }
 
+        uint32 GetLongSight() const { return m_longSightSpell; }
+        void SetLongSight(const Aura* aura = nullptr);
+        void UpdateLongSight();
+
         bool HasAtLoginFlag(AtLoginFlags f) const { return m_atLoginFlags & f; }
         void SetAtLoginFlag(AtLoginFlags f) { m_atLoginFlags |= f; }
         void RemoveAtLoginFlag(AtLoginFlags f, bool in_db_also = false);
@@ -2054,6 +2061,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool CanWalk() const { return true; }
         bool CanSwim() const { return true; }
         bool CanFly() const { return IsFlying(); }
+
+        void SetFly(bool enable) override;
 
         uint32 watching_cinematic_entry;
         Position cinematic_start;
@@ -2177,6 +2186,9 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         inline bool HasScheduledEvent() const { return m_Events.HasScheduledEvent(); }
         void SetAutoInstanceSwitch(bool v) { m_enableInstanceSwitch = v; }
+
+        void SetEscortingGuid(const ObjectGuid& guid) { _escortingGuid = guid; }
+        const ObjectGuid& GetEscortingGuid() const { return _escortingGuid; }
     protected:
         bool   m_enableInstanceSwitch;
         uint32 m_skippedUpdateTime;
@@ -2237,7 +2249,7 @@ class MANGOS_DLL_SPEC Player final: public Unit
         void _LoadActions(QueryResult *result);
         void _LoadAuras(QueryResult *result, uint32 timediff);
         void _LoadBoundInstances(QueryResult *result);
-        void _LoadInventory(QueryResult *result, uint32 timediff);
+        void _LoadInventory(QueryResult *result, uint32 timediff, bool& has_epic_mount);
         void _LoadItemLoot(QueryResult *result);
         void _LoadMails(QueryResult *result);
         void _LoadMailedItems(QueryResult *result);
@@ -2386,7 +2398,6 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool m_justBoarded;
         void SetJustBoarded(bool hasBoarded) { m_justBoarded = hasBoarded; }
         bool HasJustBoarded() { return m_justBoarded; }
-
     private:
         // internal common parts for CanStore/StoreItem functions
         InventoryResult _CanStoreItem_InSpecificSlot( uint8 bag, uint8 slot, ItemPosCountVec& dest, ItemPrototype const *pProto, uint32& count, bool swap, Item *pSrcItem ) const;
@@ -2396,14 +2407,9 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         void UpdateKnownCurrencies(uint32 itemId, bool apply);
         void AdjustQuestReqItemCount( Quest const* pQuest, QuestStatusData& questStatusData );
+        void UpdateOldRidingSkillToNew(bool has_epic_mount);
 
         void SetCanDelayTeleport(bool setting) { m_bCanDelayTeleport = setting; }
-        bool IsHasDelayedTeleport() const
-        {
-            // we should not execute delayed teleports for now dead players but has been alive at teleport
-            // because we don't want player's ghost teleported from graveyard
-            return m_bHasDelayedTeleport && (isAlive() || !m_bHasBeenAliveAtDelayedTeleport);
-        }
 
         bool SetDelayedTeleportFlagIfCan()
         {
@@ -2422,6 +2428,9 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         Unit *m_mover;
         Camera m_camera;
+
+        float m_longSightRange;
+        uint32 m_longSightSpell;
 
         GridReference<Player> m_gridRef;
         MapReference m_mapRef;
@@ -2466,6 +2475,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
         int32 m_cannotBeDetectedTimer;
 
         uint32 m_bNextRelocationsIgnored;
+
+        ObjectGuid _escortingGuid;
 
 public:
         /**

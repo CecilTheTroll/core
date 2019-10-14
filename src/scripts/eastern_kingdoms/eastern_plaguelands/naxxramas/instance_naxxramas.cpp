@@ -214,10 +214,15 @@ void instance_naxxramas::OnCreatureEnterCombat(Creature * creature)
 
 bool instance_naxxramas::WingsAreCleared()
 {
-    return GetData(TYPE_MAEXXNA) == DONE
-        && GetData(TYPE_THADDIUS) == DONE
-        && GetData(TYPE_LOATHEB) == DONE
-        && GetData(TYPE_FOUR_HORSEMEN) == DONE;
+    // All bosses must be dead, not just the end bosses. Some bosses aren't gated
+    // so we just check them all
+    for (int i = 0; i < TYPE_SAPPHIRON; ++i)
+    {
+        if (GetData(i) != DONE)
+            return false;
+    }
+
+    return true;
 }
 
 void instance_naxxramas::UpdateAutomaticBossEntranceDoor(NaxxGOs which, uint32 uiData, int requiredPreBossData)
@@ -740,7 +745,7 @@ void instance_naxxramas::OnCreatureRespawn(Creature * pCreature)
     }
 }
 
-bool instance_naxxramas::IsEncounterInProgress()
+bool instance_naxxramas::IsEncounterInProgress() const
 {
     for (uint8 i = 0; i < MAX_ENCOUNTER; ++i)
         if (m_auiEncounter[i] == IN_PROGRESS || m_auiEncounter[i] == SPECIAL)
@@ -881,8 +886,8 @@ void instance_naxxramas::SetData(uint32 uiType, uint32 uiData)
                     pC->DeleteLater();
 
                 // reputation
-                FactionEntry const *factionEntry = sFactionStore.LookupEntry(529); // Argent Dawn
-                if (factionEntry) 
+                FactionEntry const *factionEntry = sObjectMgr.GetFactionEntry(529); // Argent Dawn
+                if (factionEntry)
                 {
                     Map::PlayerList const &liste = GetMap()->GetPlayers();
                     for (Map::PlayerList::const_iterator i = liste.begin(); i != liste.end(); ++i)
@@ -1609,11 +1614,11 @@ struct mob_naxxramasPlagueSlimeAI : public ScriptedAI
     void ChangeColor()
     {
         uint32 spell = urand(28987, 28990);
-        if(const DBCSpellEntry* entry = sSpellStore.LookupEntry(spell))
+        if(const SpellEntry* entry = sSpellMgr.GetSpellEntry(spell))
             m_creature->UpdateEntry(entry->EffectMiscValue[0]);
         if (prev_spell)
             m_creature->RemoveAurasDueToSpell(prev_spell);
-        DoCastSpellIfCan(m_creature, spell, CAST_TRIGGERED);
+        DoCastSpellIfCan(m_creature, spell, CF_TRIGGERED);
         m_creature->SetObjectScale(2.0f); // updateentry and the actual spells screws up the scale...
         prev_spell = spell;
     }
@@ -1653,17 +1658,39 @@ struct mob_toxic_tunnelAI : public ScriptedAI
         Reset();
     }
     uint32 checktime;
+    uint32 _evadeTimer;
     void Reset() override
     {
         checktime = 0;
+        _evadeTimer = 0;
     }
 
     void AttackStart(Unit*) { }
     void MoveInLineOfSight(Unit*) { }
 
-    void UpdateAI(const uint32 diff) override 
+    void EnterCombat(Unit*) override
     {
-        if (checktime < diff)
+        // Poison aura is hitting someone. Start a short timer to evade & drop combat
+        if (!_evadeTimer)
+            _evadeTimer = 5000;
+    }
+
+    void UpdateAI(const uint32 diff) override
+    {
+        if (!!_evadeTimer)
+        {
+            if (_evadeTimer <= diff)
+            {
+                EnterEvadeMode();
+                _evadeTimer = 0;
+            }
+            else
+                _evadeTimer -= diff;
+        }
+
+        // creature_template_addons should make this aura permanent, but check anyway due
+        // to some reports of it not recasting
+        if (checktime <= diff)
         {
             checktime = 5000;
             if (!m_creature->HasAura(28370))

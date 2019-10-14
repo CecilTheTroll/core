@@ -1011,90 +1011,6 @@ bool GossipSelect_npc_lunaclaw_spirit(Player* pPlayer, Creature* pCreature, uint
 }
 
 /*######
-## npc_mount_vendor
-######*/
-
-
-#define GOSSIP_ACTION_YESMOUNT (GOSSIP_ACTION_INFO_DEF + 1)
-
-bool GossipHello_npc_mount_vendor(Player* pPlayer, Creature* pCreature)
-{
-    bool canBuy;
-    canBuy = false;
-    uint32 vendor = pCreature->GetEntry();
-    uint8 race = pPlayer->getRace();
-
-    if (pCreature->isQuestGiver())
-        pPlayer->PrepareQuestMenu(pCreature->GetGUID());
-
-    switch (vendor)
-    {
-        case 384:                                           //Katie Hunter
-        case 1460:                                          //Unger Statforth
-        case 2357:                                          //Merideth Carlson
-        case 4885:                                          //Gregor MacVince
-            if (pPlayer->GetReputationRank(72) != REP_EXALTED && race != RACE_HUMAN)
-                pPlayer->SEND_GOSSIP_MENU(5855, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 1261:                                          //Veron Amberstill
-            if (pPlayer->GetReputationRank(47) != REP_EXALTED && race != RACE_DWARF)
-                pPlayer->SEND_GOSSIP_MENU(5856, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 3362:                                          //Ogunaro Wolfrunner
-            if (pPlayer->GetReputationRank(76) != REP_EXALTED && race != RACE_ORC)
-                pPlayer->SEND_GOSSIP_MENU(5841, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 3685:                                          //Harb Clawhoof
-            if (pPlayer->GetReputationRank(81) != REP_EXALTED && race != RACE_TAUREN)
-                pPlayer->SEND_GOSSIP_MENU(5843, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 4730:                                          //Lelanai
-            if (pPlayer->GetReputationRank(69) != REP_EXALTED && race != RACE_NIGHTELF)
-                pPlayer->SEND_GOSSIP_MENU(5844, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 4731:                                          //Zachariah Post
-            if (pPlayer->GetReputationRank(68) != REP_EXALTED && race != RACE_UNDEAD)
-                pPlayer->SEND_GOSSIP_MENU(5840, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 7952:                                          //Zjolnir
-            if (pPlayer->GetReputationRank(530) != REP_EXALTED && race != RACE_TROLL)
-                pPlayer->SEND_GOSSIP_MENU(5842, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-        case 7955:                                          //Milli Featherwhistle
-            if (pPlayer->GetReputationRank(54) != REP_EXALTED && race != RACE_GNOME)
-                pPlayer->SEND_GOSSIP_MENU(5857, pCreature->GetGUID());
-            else canBuy = true;
-            break;
-    }
-
-    if (canBuy)
-    {
-        if (pCreature->isVendor())
-            pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_VENDOR, GOSSIP_TEXT_BROWSE_GOODS, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_TRADE);
-        pPlayer->SEND_GOSSIP_MENU(pPlayer->GetGossipTextId(pCreature), pCreature->GetGUID());
-    }
-    return true;
-}
-
-bool GossipSelect_npc_mount_vendor(Player* pPlayer, Creature* pCreature, uint32 uiSender, uint32 uiAction)
-{
-    switch (uiAction)
-    {
-        case GOSSIP_ACTION_TRADE:
-            pPlayer->SEND_VENDORLIST(pCreature->GetGUID());
-            break;
-    }
-    return true;
-}
-
-/*######
 ## npc_sayge
 ######*/
 
@@ -1427,7 +1343,7 @@ struct npc_gnomish_battle_chickenAI : ScriptedPetAI
     {
         if (pDoneBy && m_bFuryReady)
         {
-            if (DoCastSpellIfCan(m_creature, SPELL_CHICKEN_FURY, CAST_TRIGGERED) == CAST_OK)
+            if (DoCastSpellIfCan(m_creature, SPELL_CHICKEN_FURY, CF_TRIGGERED) == CAST_OK)
             {
                 m_uiChickenFuryTimer = 25000;
                 m_bFuryReady = false;
@@ -1443,7 +1359,7 @@ struct npc_gnomish_battle_chickenAI : ScriptedPetAI
         {
             if (m_uiBattleSquawkTimer < uiDiff)
             {
-                if (DoCastSpellIfCan(m_creature, SPELL_BATTLE_SQUAWK, CAST_TRIGGERED) == CAST_OK)
+                if (DoCastSpellIfCan(m_creature, SPELL_BATTLE_SQUAWK, CF_TRIGGERED) == CAST_OK)
                     m_bSquawkDone = true;
             }
             else
@@ -1575,72 +1491,6 @@ CreatureAI* GetAI_npc_emerald_dragon_whelp(Creature* pCreature)
 }
 
 /*######
-## Timbermaw Ancestor
-######*/
-enum
-{
-    SPELL_HEALING_TOUCH = 26097,
-    SPELL_LIGHTNING_BOLT = 9532
-};
-
-struct npc_timbermaw_ancestorAI : ScriptedPetAI
-{
-    explicit npc_timbermaw_ancestorAI(Creature* pCreature) : ScriptedPetAI(pCreature)
-    {
-        m_creature->SetCanModifyStats(true);
-
-        if (m_creature->GetCharmInfo())
-            m_creature->GetCharmInfo()->SetReactState(REACT_DEFENSIVE);
-
-        m_healingTouchTimer = 0;
-
-        npc_timbermaw_ancestorAI::Reset();
-    }
-
-    uint32 m_healingTouchTimer;
-
-    void Reset() override {}
-
-    void UpdatePetAI(const uint32 uiDiff) override
-    {
-        if (m_healingTouchTimer < uiDiff)
-        {
-            if (m_creature->GetOwner()->HealthBelowPct(50))
-            {
-                if (DoCastSpellIfCan(m_creature->GetOwner(), SPELL_HEALING_TOUCH, false) == CAST_OK)
-                    m_healingTouchTimer = 7000;
-            }
-            else if (Unit* pTarget = m_creature->SelectRandomFriendlyTarget(m_creature->GetOwner(), 30.0f))
-            {
-                if (pTarget->HealthBelowPct(50))
-                {
-                    if (DoCastSpellIfCan(pTarget, SPELL_HEALING_TOUCH, false) == CAST_OK)
-                        m_healingTouchTimer = 7000;
-                }
-            }
-        }
-        else
-            m_healingTouchTimer -= uiDiff;
-
-        if (!m_creature->IsNonMeleeSpellCasted(false))
-        {
-            if (Unit * pTarget = m_creature->getVictim())
-            {
-                if (!pTarget->HasBreakableByDamageCrowdControlAura() && !pTarget->IsImmuneToSchoolMask(SPELL_SCHOOL_MASK_NATURE))
-                    DoCastSpellIfCan(pTarget, SPELL_LIGHTNING_BOLT, false);
-            }
-        }
-
-        ScriptedPetAI::UpdatePetAI(uiDiff);
-    }
-};
-
-CreatureAI* GetAI_npc_timbermaw_ancestor(Creature* pCreature)
-{
-    return new npc_timbermaw_ancestorAI(pCreature);
-}
-
-/*######
 ## Cannonball Runner
 ######*/
 enum
@@ -1702,7 +1552,7 @@ struct npc_the_cleanerAI : public ScriptedAI
 
     void Reset()
     {
-        DoCastSpellIfCan(m_creature, SPELL_IMMUNITY, CAST_TRIGGERED);
+        DoCastSpellIfCan(m_creature, SPELL_IMMUNITY, CF_TRIGGERED);
         m_uiDespawnTimer = 3000;
     }
 
@@ -1748,8 +1598,8 @@ enum
 {
     NPC_FIREWORK_GUY_ELUNE          = 15918,
 
-    GO_FIREWORK_LAUNCHER            = 180771,
-    GO_CLUSTER_LAUNCHER             = 180772,
+    NPC_FIREWORK_CREDIT_MARKER      = 15893,
+    NPC_CLUSTER_CREDIT_MARKER       = 15894,
     GO_OMEN_CLUSTER_LAUNCHER        = 180874,
 
     SPELL_LUNAR_FORTUNE             = 26522
@@ -1885,10 +1735,9 @@ struct npc_pats_firework_guyAI : ScriptedAI
 
         if (m_creature->IsTemporarySummon())
         {
-            Player* pSummoner = m_creature->GetMap()->GetPlayer(static_cast<TemporarySummon*>(m_creature)->GetSummonerGuid());
-
-            if (pSummoner)
-                pSummoner->CastedCreatureOrGO(Fireworks[m_uiIndex].m_bIsCluster ? GO_CLUSTER_LAUNCHER : GO_FIREWORK_LAUNCHER, ObjectGuid(), 0);
+            if (Player* pSummoner = m_creature->GetMap()->GetPlayer(static_cast<TemporarySummon*>(m_creature)->GetSummonerGuid()))
+                if (CreatureInfo const* cInfo = ObjectMgr::GetCreatureTemplate(Fireworks[m_uiIndex].m_bIsCluster ? NPC_CLUSTER_CREDIT_MARKER : NPC_FIREWORK_CREDIT_MARKER))
+                    pSummoner->KilledMonster(cInfo, ObjectGuid());
         }
 
         if (GetClosestGameObjectWithEntry(m_creature, GO_OMEN_CLUSTER_LAUNCHER, INTERACTION_DISTANCE))
@@ -2379,7 +2228,7 @@ struct npc_shahramAI : ScriptedPetAI
                 }
             }
 
-            if (shahramSpell && DoCastSpellIfCan(m_creature, shahramSpell, CAST_TRIGGERED) == CAST_OK)
+            if (shahramSpell && DoCastSpellIfCan(m_creature, shahramSpell, CF_TRIGGERED) == CAST_OK)
             {
                 if (!hasCastDebuff)
                     hasCastDebuff = true;
@@ -3476,8 +3325,7 @@ enum
 
     TEXT_ID_VICTORY_A   = 8315,
     TEXT_ID_VICTORY_H   = 8316,
-    TEXT_ID_TIE         = 8318,
-
+    TEXT_ID_TIE         = 8318
 };
 
 const uint32 CityZones[6] =
@@ -3509,7 +3357,7 @@ struct npc_kwee_peddlefeetAI : public ScriptedAI
 
     void Reset() { }
 
-    void SetVariables() 
+    void SetVariables()
     {
         uint32 firstBoss = 0;
         uint32 horde = sObjectMgr.GetSavedVariable(VAR_KWEE_HORDE, 0);
@@ -3577,7 +3425,6 @@ bool GossipHello_npc_kwee_peddlefeet(Player* pPlayer, Creature* pCreature)
             return true;
         }
     }
-    
     return false;
 }
 
@@ -3611,6 +3458,72 @@ bool QuestRewarded_npc_kwee_peddlefeet(Player* pPlayer, Creature* pCreature, con
     }
 
     return true;
+}
+
+enum
+{
+    OBJECT_DARK_IRON_MUG = 165578,
+    SPELL_DARK_IRON_MUG = 14813,
+    EMOTE_GUZZLE_ALE = 10167,
+};
+
+struct npc_oozeling_jubjubAI : public ScriptedPetAI
+{
+    npc_oozeling_jubjubAI(Creature* pCreature) : ScriptedPetAI(pCreature)
+    {
+        Reset();
+    }
+
+    uint32 m_uiReturnTimer;
+    void Reset()
+    {
+        m_uiReturnTimer = 0;
+    }
+
+    void SpellHit(Unit* pUnit, const SpellEntry* pSpell)
+    {
+        if (pSpell->Id == SPELL_DARK_IRON_MUG)
+            m_uiReturnTimer = 10000;
+    }
+
+    void MovementInform(uint32 type, uint32 id)
+    {
+        if (type == POINT_MOTION_TYPE && id == 1)
+        {
+            m_creature->MonsterTextEmote(EMOTE_GUZZLE_ALE);
+            m_creature->addUnitState(UNIT_STAT_ROOT);
+            m_uiReturnTimer = 3000;
+        }
+    }
+
+    void UpdateAI(const uint32 uiDiff)
+    {
+        if (m_uiReturnTimer > 0)
+        {
+            if (m_uiReturnTimer <= uiDiff)
+            {
+                m_uiReturnTimer = 0;
+                m_creature->clearUnitState(UNIT_STAT_ROOT);
+
+                if (GameObject* pMug = m_creature->FindNearestGameObject(OBJECT_DARK_IRON_MUG, 1.0f))
+                {
+                    pMug->SetLootState(GO_JUST_DEACTIVATED);
+                    pMug->AddObjectToRemoveList();
+                }
+            }
+            else
+                m_uiReturnTimer -= uiDiff;
+        }
+        else
+        {
+            ScriptedPetAI::UpdateAI(uiDiff);
+        }
+    }
+};
+
+CreatureAI* GetAI_npc_oozeling_jubjub(Creature* pCreature)
+{
+    return new npc_oozeling_jubjubAI(pCreature);
 }
 
 void AddSC_npcs_special()
@@ -3668,12 +3581,6 @@ void AddSC_npcs_special()
     newscript->RegisterSelf();
 
     newscript = new Script;
-    newscript->Name = "npc_mount_vendor";
-    newscript->pGossipHello =  &GossipHello_npc_mount_vendor;
-    newscript->pGossipSelect = &GossipSelect_npc_mount_vendor;
-    newscript->RegisterSelf();
-
-    newscript = new Script;
     newscript->Name = "npc_sayge";
     newscript->pGossipHello = &GossipHello_npc_sayge;
     newscript->pGossipSelect = &GossipSelect_npc_sayge;
@@ -3702,11 +3609,6 @@ void AddSC_npcs_special()
     newscript = new Script;
     newscript->Name = "npc_emerald_dragon_whelp";
     newscript->GetAI = &GetAI_npc_emerald_dragon_whelp;
-    newscript->RegisterSelf();
-
-    newscript = new Script;
-    newscript->Name = "npc_timbermaw_ancestor";
-    newscript->GetAI = &GetAI_npc_timbermaw_ancestor;
     newscript->RegisterSelf();
 
     newscript = new Script;
@@ -3790,5 +3692,10 @@ void AddSC_npcs_special()
     newscript->GetAI = &GetAI_npc_kwee_peddlefeet;
     newscript->pGossipHello = &GossipHello_npc_kwee_peddlefeet;
     newscript->pQuestRewardedNPC = &QuestRewarded_npc_kwee_peddlefeet;
+    newscript->RegisterSelf();
+
+    newscript = new Script;
+    newscript->Name = "npc_oozeling_jubjub";
+    newscript->GetAI = &GetAI_npc_oozeling_jubjub;
     newscript->RegisterSelf();
 }

@@ -23,7 +23,6 @@
 #define _SPELLMGR_H
 
 // For static or at-server-startup loaded spell data
-// For more high level function for sSpellStore data
 
 #include "Common.h"
 #include "SharedDefines.h"
@@ -90,6 +89,8 @@ enum SpellSpecific
     SPELL_FOOD              = 20,
     SPELL_DRINK             = 21,
     SPELL_FOOD_AND_DRINK    = 22,
+    SPELL_NEGATIVE_HASTE    = 23,
+    SPELL_SNARE             = 24,
 };
 
 SpellSpecific GetSpellSpecific(uint32 spellId);
@@ -218,6 +219,17 @@ inline bool IsSpellHaveAura(SpellEntry const *spellInfo, AuraType aura)
     return false;
 }
 
+inline bool IsSpellHaveSingleAura(SpellEntry const *spellInfo, AuraType aura)
+{
+    bool hasAura = false;
+    for (int i = 0; i < MAX_EFFECT_INDEX; ++i)
+        if (AuraType(spellInfo->EffectApplyAuraName[i]) == aura)
+            hasAura = true;
+        else if (spellInfo->Effect[i] == SPELL_EFFECT_APPLY_AURA)
+            return false;
+    return hasAura;
+}
+
 inline bool IsSpellLastAuraEffect(SpellEntry const *spellInfo, SpellEffectIndex effecIdx)
 {
     for(int i = effecIdx+1; i < MAX_EFFECT_INDEX; ++i)
@@ -240,7 +252,13 @@ inline bool IsElementalShield(SpellEntry const *spellInfo)
     return spellInfo->IsFitToFamilyMask<CF_SHAMAN_LIGHTNING_SHIELD>() || spellInfo->Id == 23552;
 }
 
+inline bool IsFromBehindOnlySpell(SpellEntry const *spellInfo)
+{
+    return ((spellInfo->AttributesEx2 == 0x100000 && (spellInfo->AttributesEx & 0x200) == 0x200) || (spellInfo->Custom & SPELL_CUSTOM_FROM_BEHIND));
+}
+
 int32 CompareAuraRanks(uint32 spellId_1, uint32 spellId_2);
+bool CompareSpellSpecificAuras(SpellEntry const* spellInfo_1, SpellEntry const* spellInfo_2);
 
 // order from less to more strict
 bool IsSingleFromSpellSpecificPerTargetPerCaster(SpellSpecific spellSpec1,SpellSpecific spellSpec2);
@@ -451,6 +469,16 @@ inline bool HasAuraWithSpellTriggerEffect(SpellEntry const *spellInfo)
             case SPELL_AURA_PROC_TRIGGER_SPELL:
                 return true;
         }
+    }
+    return false;
+}
+
+inline bool IsDismountSpell(SpellEntry const *spellInfo)
+{
+    for (int32 i = 0; i < MAX_EFFECT_INDEX; ++i)
+    {
+        if ((spellInfo->Effect[i] == SPELL_EFFECT_APPLY_AURA) && (spellInfo->EffectApplyAuraName[i] == SPELL_AURA_MECHANIC_IMMUNITY) && (spellInfo->EffectMiscValue[i] == MECHANIC_MOUNT))
+            return true;
     }
     return false;
 }
@@ -677,7 +705,7 @@ struct SpellProcEventEntry
 {
     uint32      schoolMask;
     uint32      spellFamilyName;                            // if nonzero - for matching proc condition based on candidate spell's SpellFamilyNamer value
-    ClassFamilyMask spellFamilyMask[MAX_EFFECT_INDEX];      // if nonzero - for matching proc condition based on candidate spell's SpellFamilyFlags  (like auras 107 and 108 do)
+    uint64      spellFamilyMask[MAX_EFFECT_INDEX];      // if nonzero - for matching proc condition based on candidate spell's SpellFamilyFlags  (like auras 107 and 108 do)
     uint32      procFlags;                                  // bitmask for matching proc event
     uint32      procEx;                                     // proc Extend info (see ProcFlagsEx)
     float       ppmRate;                                    // for melee (ranged?) damage spells - proc rate per minute. if zero, falls back to flat chance from Spell.dbc
@@ -1033,14 +1061,14 @@ class SpellMgr
         }
 
         // Spell affects
-        ClassFamilyMask GetSpellAffectMask(uint32 spellId, SpellEffectIndex effectId) const
+        uint64 GetSpellAffectMask(uint32 spellId, SpellEffectIndex effectId) const
         {
             SpellAffectMap::const_iterator itr = mSpellAffectMap.find((spellId<<8) + effectId);
             if (itr != mSpellAffectMap.end())
-                return ClassFamilyMask(itr->second);
+                return itr->second;
             if (SpellEntry const* spellEntry = GetSpellEntry(spellId))
-                return ClassFamilyMask(spellEntry->EffectItemType[effectId]);
-            return ClassFamilyMask();
+                return spellEntry->EffectItemType[effectId];
+            return 0;
         }
 
         SpellElixirMap const& GetSpellElixirMap() const { return mSpellElixirs; }

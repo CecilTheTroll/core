@@ -22,6 +22,7 @@ set (game_SRCS
 	AuraRemovalMgr.cpp
 	AutoBroadCastMgr.cpp
 	Camera.cpp
+	Conditions.cpp
 	CreatureGroups.cpp
 	GameEventMgr.cpp
 	GMTicketMgr.cpp
@@ -59,6 +60,7 @@ set (game_SRCS
 	AI/GuardAI.cpp
 	AI/NullCreatureAI.cpp
 	AI/PetAI.cpp
+	AI/PetEventAI.cpp
 	AI/PlayerAI.cpp
 	AI/ReactorAI.cpp
 	AI/ScriptedAI.cpp
@@ -232,6 +234,7 @@ set (game_SRCS
 	AuraRemovalMgr.h
 	AutoBroadCastMgr.h
 	Camera.h
+	Conditions.h
 	CreatureGroups.h
 	Formulas.h
 	GameEventMgr.h
@@ -273,6 +276,7 @@ set (game_SRCS
 	AI/GuardAI.h
 	AI/NullCreatureAI.h
 	AI/PetAI.h
+	AI/PetEventAI.h
 	AI/PlayerAI.h
 	AI/ReactorAI.h
 	AI/ScriptedAI.h

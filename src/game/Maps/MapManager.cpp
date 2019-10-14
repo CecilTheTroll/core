@@ -208,14 +208,6 @@ bool MapManager::CanPlayerEnter(uint32 mapid, Player* player)
             player->SendTransferAborted(TRANSFER_ABORT_TOO_MANY_INSTANCES);
             return false;
         }
-
-        // TODO: move this to a map dependent location
-        /*if(i_data && i_data->IsEncounterInProgress())
-        {
-            DEBUG_LOG("MAP: Player '%s' can't enter instance '%s' while an encounter is in progress.", player->GetName(), GetMapName());
-            player->SendTransferAborted(TRANSFER_ABORT_ZONE_IN_COMBAT);
-            return(false);
-        }*/
     }
 
     return true;
@@ -309,14 +301,13 @@ void MapManager::Update(uint32 diff)
     int mapIdx = 0;
     int continentsIdx = 0;
     uint32 now = WorldTimer::getMSTime();
+    uint32 inactiveTimeLimit = sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME);
     for (MapMapType::iterator iter = i_maps.begin(); iter != i_maps.end(); ++iter)
     {
         // If this map has been empty for too long, we no longer update it.
-        if (!iter->second->HavePlayers() && sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME))
-        {
-            if (WorldTimer::getMSTimeDiff(iter->second->GetLastPlayerLeftTime(), now) > sWorld.getConfig(CONFIG_UINT32_EMPTY_MAPS_UPDATE_TIME))
-                continue;
-        }
+        if (!iter->second->ShouldUpdateMap(now, inactiveTimeLimit))
+            continue;
+
         iter->second->UpdateSync(mapsDiff);
         iter->second->MarkNotUpdated();
         iter->second->SetMapUpdateIndex(-1);
