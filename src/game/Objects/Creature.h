@@ -64,6 +64,9 @@ enum CreatureFlagsExtra
     CREATURE_FLAG_EXTRA_KEEP_POSITIVE_AURAS_ON_EVADE = 0x00001000,       // creature keeps positive auras at reset
     CREATURE_FLAG_EXTRA_ALWAYS_CRUSH                 = 0x00002000,       // creature always roll a crushing melee outcome when not miss/crit/dodge/parry/block
     CREATURE_FLAG_EXTRA_IMMUNE_AOE                   = 0x00004000,       // creature is immune to AoE
+    CREATURE_FLAG_EXTRA_CHASE_GEN_NO_BACKING         = 0x00008000,       // creature does not move back when target is within bounding radius
+    CREATURE_FLAG_EXTRA_NO_ASSIST                    = 0x00010000,       // creature does not aggro when nearby creatures aggro
+    CREATURE_FLAG_EXTRA_SINGLE_LOOT_GENERATION       = 0x00020000        // creature will only generate loot once - no loot after subsequent deaths
 };
 
 // GCC have alternative #pragma pack(N) syntax and old gcc version not support pack(push,N), also any gcc version not support it at some platform
@@ -76,6 +79,11 @@ enum CreatureFlagsExtra
 #define MAX_KILL_CREDIT 2
 #define MAX_CREATURE_MODEL 4                                // only single send to client in static data
 #define CREATURE_FLEE_TEXT 1150
+
+#define SPEED_REDUCTION_NONE   1.0f
+#define SPEED_REDUCTION_HP_15  0.7f
+#define SPEED_REDUCTION_HP_10  0.6f
+#define SPEED_REDUCTION_HP_5   0.5f
 
 // from `creature_template` table
 struct CreatureInfo
@@ -176,15 +184,6 @@ struct EquipmentInfo
 {
     uint32  entry;
     uint32  equipentry[3];
-};
-
-// depricated old way
-struct EquipmentInfoRaw
-{
-    uint32  entry;
-    uint32  equipmodel[3];
-    uint32  equipinfo[3];
-    uint32  equipslot[3];
 };
 
 // from `creature` table
@@ -310,12 +309,13 @@ enum SelectFlags
 // Vendors
 struct VendorItem
 {
-    VendorItem(uint32 _item, uint32 _maxcount, uint32 _incrtime)
-        : item(_item), maxcount(_maxcount), incrtime(_incrtime) {}
+    VendorItem(uint32 _item, uint32 _maxcount, uint32 _incrtime, uint32 _itemflags)
+        : item(_item), maxcount(_maxcount), incrtime(_incrtime), itemflags(_itemflags) {}
 
     uint32 item;
     uint32 maxcount;                                        // 0 for infinity item amount
     uint32 incrtime;                                        // time for restore items amount if maxcount != 0
+    uint32 itemflags;
 };
 typedef std::vector<VendorItem*> VendorItemList;
 
@@ -330,9 +330,9 @@ struct VendorItemData
     }
     bool Empty() const { return m_items.empty(); }
     uint8 GetItemCount() const { return m_items.size(); }
-    void AddItem( uint32 item, uint32 maxcount, uint32 ptime)
+    void AddItem( uint32 item, uint32 maxcount, uint32 ptime, uint32 itemflags)
     {
-        m_items.push_back(new VendorItem(item, maxcount, ptime));
+        m_items.push_back(new VendorItem(item, maxcount, ptime, itemflags));
     }
     bool RemoveItem( uint32 item_id );
     VendorItem const* FindItem(uint32 item_id) const;
@@ -348,12 +348,19 @@ struct VendorItemData
 
 struct VendorItemCount
 {
-    explicit VendorItemCount(uint32 _item, uint32 _count)
-        : itemId(_item), count(_count), lastIncrementTime(time(nullptr)) {}
+    explicit VendorItemCount(uint32 _item, uint32 _count, uint32 _restockDelay)
+        : itemId(_item), count(_count), restockDelay(_restockDelay), lastIncrementTime(time(nullptr)) {}
 
     uint32 itemId;
     uint32 count;
+    uint32 restockDelay;
     time_t lastIncrementTime;
+};
+
+enum VendorItemFlags
+{
+    VENDOR_ITEM_FLAG_RANDOM_RESTOCK   = 0x01,
+    VENDOR_ITEM_FLAG_DYNAMIC_RESTOCK  = 0x02,
 };
 
 typedef std::list<VendorItemCount> VendorItemCounts;
@@ -505,6 +512,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         void SetHomePosition(float x, float y, float z, float o);
         void GetHomePosition(float &x, float &y, float &z, float &o, float* dist = nullptr);
         float GetHomePositionO() const { return m_HomeOrientation; }
+        void ResetHomePosition();
 
         CreatureSubtype GetSubtype() const { return m_subtype; }
         bool IsPet() const { return m_subtype == CREATURE_SUBTYPE_PET; }
@@ -568,10 +576,15 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool IsInEvadeMode() const;
 
         bool AIM_Initialize();
+        void SetAI(CreatureAI * ai) { i_AI = ai; }
 
         CreatureAI* AI() { return i_AI; }
         CreatureAI const* AI() const { return i_AI; }
         void SetAInitializeOnRespawn(bool initialize) { m_AI_InitializeOnRespawn = initialize; }
+
+        void SetFeatherFall(bool enable) override;
+        void SetHover(bool enable) override;
+        void SetWaterWalk(bool enable) override;
 
         uint32 GetShieldBlockValue() const override
         {
@@ -647,6 +660,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         Player* GetOriginalLootRecipient() const;           // ignore group changes/etc, not for looting
         bool IsTappedBy(Player const* player) const;
         bool IsSkinnableBy(Player const* player) const { return !skinningForOthersTimer || IsTappedBy(player); }
+        bool CanHaveLoot(Player const* player) const;
 
         SpellEntry const *ReachWithSpellAttack(Unit *pVictim);
         SpellEntry const *ReachWithSpellCure(Unit *pVictim);
@@ -668,6 +682,9 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool CanAssistTo(const Unit* u, const Unit* enemy, bool checkfaction = true) const;
         bool CanInitiateAttack();
 
+        uint32 GetDefaultMount() { return m_mountId; }
+        void SetDefaultMount(uint32 id) { m_mountId = id; }
+        
         void SetTauntImmunity(bool immune);
 
         MovementGeneratorType GetDefaultMovementType() const { return m_defaultMovementType; }
@@ -708,9 +725,9 @@ class MANGOS_DLL_SPEC Creature : public Unit
 
         void SetInCombatWithZone(bool initialPulse = true);
         bool canStartAttack(Unit const* who, bool force) const;
-        Unit *SelectVictim();
         bool _IsTargetAcceptable(Unit const *target) const;
         bool canCreatureAttack(Unit const *pVictim, bool force) const;
+        bool CantPathToVictim() const;
 
         // Smartlog
         time_t GetCombatTime(bool total) const;
@@ -728,7 +745,14 @@ class MANGOS_DLL_SPEC Creature : public Unit
         // AI helpers
         Unit* SelectNearestHostileUnitInAggroRange(bool useLOS) const;
         Unit* SelectNearestTargetInAttackDistance(float dist) const;
-        Unit* DoSelectLowestHpFriendly(float fRange, uint32 uiMinHPDiff = 1, bool bPercent = false) const;
+        Unit* DoSelectLowestHpFriendly(float fRange, uint32 uiMinHPDiff = 1, bool bPercent = false, Unit* except = nullptr) const;
+        Unit* DoFindFriendlyMissingBuff(float range, uint32 spellid, Unit* except = nullptr) const;
+        Unit* DoFindFriendlyCC(float range) const;
+
+        // Used by Creature Spells system to always know result of cast
+        SpellCastResult TryToCast(Unit* pTarget, uint32 uiSpell, uint32 uiCastFlags, uint8 uiChance);
+        SpellCastResult TryToCast(Unit* pTarget, const SpellEntry* pSpellInfo, uint32 uiCastFlags, uint8 uiChance);
+
         // - Victim selection (from aggro list)
         Unit* GetNearestVictimInRange(float min, float max);
         Unit* GetFarthestVictimInRange(float min, float max);
@@ -776,6 +800,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         void SetFactionTemporary(uint32 factionId, uint32 tempFactionFlags = TEMPFACTION_ALL);
         void ClearTemporaryFaction();
         uint32 GetTemporaryFactionFlags() const { return m_temporaryFactionFlags; }
+        int32 GetReputationId() const { return m_reputationId; }
 
         void SendAreaSpiritHealerQueryOpcode(Player *pl);
 
@@ -796,11 +821,12 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool _manaRegen;
         uint32 m_manaRegen;
 
+        uint32 m_startwaypoint;                             // currentwaypoint from creature table
+
         void RegenerateHealth();
         void RegenerateMana();
 
         void SetVirtualItem(VirtualItemSlot slot, uint32 item_id);
-        void SetVirtualItemRaw(VirtualItemSlot slot, uint32 display_id, uint32 info0, uint32 info1);
 
         void ResetDamageTakenOrigin()
         {
@@ -838,6 +864,9 @@ class MANGOS_DLL_SPEC Creature : public Unit
 
         // (msecs)timer used for group loot
         uint32 GetGroupLootTimer() { return m_groupLootTimer; }
+
+        void SetEscortable(bool escortable) { _isEscortable = escortable; }
+        bool IsEscortable() const { return _isEscortable; }
 
     protected:
         bool MeetsSelectAttackingRequirement(Unit* pTarget, SpellEntry const* pSpellInfo, uint32 selectFlags) const;
@@ -877,6 +906,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         MovementGeneratorType m_defaultMovementType;
         Cell m_currentCell;                                 // store current cell where creature listed
         uint32 m_equipmentId;
+        uint32 m_mountId;                                   // display Id to mount
 
         // below fields has potential for optimization
         bool m_AlreadyCallAssistance;
@@ -886,6 +916,7 @@ class MANGOS_DLL_SPEC Creature : public Unit
         bool m_AI_InitializeOnRespawn;
         bool m_isDeadByDefault;
         uint32 m_temporaryFactionFlags;                     // used for real faction changes (not auras etc)
+        int32 m_reputationId;                              // Id of the creature's faction in the client reputations list.
 
         SpellSchoolMask m_meleeDamageSchoolMask;
         uint32 m_originalEntry;
@@ -912,6 +943,10 @@ class MANGOS_DLL_SPEC Creature : public Unit
         uint32 _nonPlayerDamageTaken;
         
         float m_callForHelpDist;
+
+        bool _isEscortable;
+        bool _hasDied;
+        bool _hasDiedAndRespawned;
 
     private:
         GridReference<Creature> m_gridRef;

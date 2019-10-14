@@ -159,6 +159,9 @@ struct boss_sapphironAI : public ScriptedAI
         setHover(false, true);
         SetCombatMovement(true);
         m_TargetNotReachableTimer = 0;
+
+        if (m_pInstance && m_pInstance->GetData(TYPE_SAPPHIRON) != DONE)
+            m_pInstance->SetData(TYPE_SAPPHIRON, NOT_STARTED);
     }
 
     void UnSummonWingBuffet()
@@ -396,13 +399,7 @@ struct boss_sapphironAI : public ScriptedAI
             m_creature->UpdateCombatState(false);
 
             m_creature->HandleEmote(EMOTE_ONESHOT_LIFTOFF);
-            m_creature->SetUnitMovementFlags(MOVEFLAG_HOVER);
-            m_creature->SendHeartBeat(true);
-            WorldPacket data;
-            data.Initialize(SMSG_MOVE_SET_HOVER, 8 + 4);
-            data << m_creature->GetPackGUID();
-            data << uint32(0);
-            m_creature->SendMovementMessageToSet(std::move(data), true);
+            m_creature->SetHover(true);
             
             m_creature->m_TargetNotReachableTimer = 0;
             if (m_creature->GetTemporaryFactionFlags() & TEMPFACTION_RESTORE_COMBAT_STOP)
@@ -416,18 +413,9 @@ struct boss_sapphironAI : public ScriptedAI
         {
             m_creature->RemoveAurasDueToSpell(17131);
             if (m_creature->HasUnitMovementFlag(MOVEFLAG_HOVER))
-            {
                 m_creature->HandleEmote(EMOTE_ONESHOT_LAND);
-                
-                m_creature->RemoveUnitMovementFlag(MOVEFLAG_HOVER);
-            }
 
-
-            WorldPacket data;
-            data.Initialize(SMSG_MOVE_UNSET_HOVER, 8 + 4);
-            data << m_creature->GetPackGUID();
-            data << uint32(0);
-            m_creature->SendMovementMessageToSet(std::move(data), true);
+            m_creature->SetHover(false);
 
             if (!onReset)
             {
@@ -449,7 +437,7 @@ struct boss_sapphironAI : public ScriptedAI
              m_creature->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE &&
             !m_creature->HasDistanceCasterMovement() &&
            (!m_creature->IsWithinDistInMap(m_creature->getVictim(), m_creature->GetMaxChaseDistance(m_creature->getVictim())) || !m_creature->IsWithinLOSInMap(m_creature->getVictim())) &&
-            !m_creature->GetMotionMaster()->operator->()->IsReachable();
+            !m_creature->GetMotionMaster()->GetCurrent()->IsReachable();
         
         if (unreachableTarget)
         {

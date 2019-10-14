@@ -487,7 +487,7 @@ void BattleGroundAV::UpgradeArmor(Object* questGiver, Player *player)
 
     if (m_Team_QuestStatus[teamIdx][0] == 500 || m_Team_QuestStatus[teamIdx][0] == 1000 || m_Team_QuestStatus[teamIdx][0] == 1500)  //25,50,75 turn ins
     {
-        for (BG_AV_Nodes i = BG_AV_NODES_FIRSTAID_STATION; i <= BG_AV_NODES_FROSTWOLF_HUT; ++i)
+        for (BG_AV_Nodes i = BG_AV_NODES_FIRSTAID_STATION; i <= BG_AV_NODES_FROSTWOLF_WTOWER; ++i)
             if (m_Nodes[i].Owner == teamIdx && m_Nodes[i].State == POINT_CONTROLLED)
                 PopulateNode(i);
     }
@@ -960,7 +960,7 @@ void BattleGroundAV::EndBattleGround(Team winner)
         if (tower_survived[i])
         {
             RewardReputationToTeam(faction[i], tower_survived[i] * m_RepSurviveTower, team[i]);
-            RewardHonorToTeam(GetBonusHonorFromKill(tower_survived[i] * BG_AV_KILL_SURVIVING_TOWER), team[i]);
+            RewardHonorToTeam(uint32(GetBonusHonorFromKill(tower_survived[i] * BG_AV_KILL_SURVIVING_TOWER) * GetHonorModifier()), team[i]);
         }
         DEBUG_LOG("BattleGroundAV: EndbattleGround: bgteam: %u towers:%u honor:%u rep:%u", i, tower_survived[i], GetBonusHonorFromKill(tower_survived[i] * BG_AV_KILL_SURVIVING_TOWER), tower_survived[i] * BG_AV_REP_SURVIVING_TOWER);
         if (graves_owned[i])
@@ -989,13 +989,6 @@ void BattleGroundAV::EndBattleGround(Team winner)
             RewardHonorToTeam(396, HORDE);
         if (winner == ALLIANCE)
             RewardHonorToTeam(396, ALLIANCE);
-    }
-
-    // both teams:
-    if (m_HonorMapComplete)
-    {
-        RewardHonorToTeam(m_HonorMapComplete, ALLIANCE);
-        RewardHonorToTeam(m_HonorMapComplete, HORDE);
     }
     BattleGround::EndBattleGround(winner);
 }
@@ -1200,45 +1193,45 @@ void BattleGroundAV::PopulateNode(BG_AV_Nodes node)
     BattleGroundAVTeamIndex OldteamIdx = m_Nodes[node].PrevOtherOwner;
 
     uint32 delay = 0;
+    uint32 defenderTypeNew;
+    uint32 defenderTypeOld;
+
+    if (NewteamIdx == BG_AV_TEAM_NEUTRAL)
+        defenderTypeNew = 0;
+    else if (m_Team_QuestStatus[NewteamIdx][0] < 500)
+        defenderTypeNew = 0;
+    else if (m_Team_QuestStatus[NewteamIdx][0] < 1000)
+        defenderTypeNew = 1;
+    else if (m_Team_QuestStatus[NewteamIdx][0] < 1500)
+        defenderTypeNew = 2;
+    else
+        defenderTypeNew = 3;
+
+    if (OldteamIdx == BG_AV_TEAM_NEUTRAL)
+        defenderTypeOld = 0;
+    else if (m_Team_QuestStatus[OldteamIdx][0] < 500)
+        defenderTypeOld = 0;
+    else if (m_Team_QuestStatus[OldteamIdx][0] < 1000)
+        defenderTypeOld = 1;
+    else if (m_Team_QuestStatus[OldteamIdx][0] < 1500)
+        defenderTypeOld = 2;
+    else
+        defenderTypeOld = 3;
+
     if (IsGrave(node))
     {
-        uint32 graveDefenderTypeNew;
-        uint32 graveDefenderTypeOld;
-
-        if (NewteamIdx == BG_AV_TEAM_NEUTRAL)
-            graveDefenderTypeNew = 0;
-        else if (m_Team_QuestStatus[NewteamIdx][0] < 500)
-            graveDefenderTypeNew = 0;
-        else if (m_Team_QuestStatus[NewteamIdx][0] < 1000)
-            graveDefenderTypeNew = 1;
-        else if (m_Team_QuestStatus[NewteamIdx][0] < 1500)
-            graveDefenderTypeNew = 2;
-        else
-            graveDefenderTypeNew = 3;
-
-        if (OldteamIdx == BG_AV_TEAM_NEUTRAL)
-            graveDefenderTypeOld = 0;
-        else if (m_Team_QuestStatus[OldteamIdx][0] < 500)
-            graveDefenderTypeOld = 0;
-        else if (m_Team_QuestStatus[OldteamIdx][0] < 1000)
-            graveDefenderTypeOld = 1;
-        else if (m_Team_QuestStatus[OldteamIdx][0] < 1500)
-            graveDefenderTypeOld = 2;
-        else
-            graveDefenderTypeOld = 3;
-
         if (m_Nodes[node].State == POINT_CONTROLLED)
         {
             // En cas de defense : l event est déjà spawn -> juste set le mode.
-            SetSpawnEventMode(BG_AV_NODES_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + graveDefenderTypeNew, RESPAWN_FORCED);
+            SetSpawnEventMode(BG_AV_NODES_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeNew, RESPAWN_FORCED);
             // En cas de prise du flag (destroy node)
-            SpawnEvent(BG_AV_NODES_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + graveDefenderTypeNew, true, true);
+            SpawnEvent(BG_AV_NODES_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeNew, true, true);
             delay = 5;
         }
         else
         {
             // En cas de capture du flag (assault node) -> on ne despawn pas l event -> juste stop le repop
-            SetSpawnEventMode(BG_AV_NODES_MAX + node, OldteamIdx * BG_AV_MAX_GRAVETYPES + graveDefenderTypeOld, RESPAWN_STOP);
+            SetSpawnEventMode(BG_AV_NODES_MAX + node, OldteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeOld, RESPAWN_STOP);
             delay = 1;
         }
     }
@@ -1246,13 +1239,24 @@ void BattleGroundAV::PopulateNode(BG_AV_Nodes node)
     {
         if (m_Nodes[node].State == POINT_CONTROLLED) // we can spawn the current owner event
         {
+            // Base Defenders
             SetSpawnEventMode(BG_AV_NODES_MAX + node, (NewteamIdx * BG_AV_MAX_STATES) + 1, RESPAWN_FORCED);
             SpawnEvent(BG_AV_NODES_MAX + node, (NewteamIdx * BG_AV_MAX_STATES) + 1, true, true);
+
+            // Bunker / Tower Defenders
+            SetSpawnEventMode(BG_AV_TOWERS_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeNew, RESPAWN_FORCED);
+            SpawnEvent(BG_AV_TOWERS_MAX + node, NewteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeNew, true, true);
+
             delay = 5;
         }
         else // we despawn the event from the prevowner
         {
+            // Base Defenders
             SetSpawnEventMode(BG_AV_NODES_MAX + node, (OldteamIdx * BG_AV_MAX_STATES) + 1, RESPAWN_STOP);
+
+            // Bunker / Tower Defenders
+            SetSpawnEventMode(BG_AV_TOWERS_MAX + node, OldteamIdx * BG_AV_MAX_GRAVETYPES + defenderTypeOld, RESPAWN_STOP);
+
             delay = 1;
         }
     }
@@ -1547,7 +1551,10 @@ void BattleGroundAV::InitNode(BG_AV_Nodes node, BattleGroundAVTeamIndex teamIdx,
     if (IsGrave(node))                                      // grave-creatures are special cause of a quest
         m_ActiveEvents[node + BG_AV_NODES_MAX]  = teamIdx * BG_AV_MAX_GRAVETYPES;
     if (IsTower(node))                                      // tower-creatures are special cause of a quest
-        m_ActiveEvents[node + BG_AV_NODES_MAX]  = teamIdx * 2 + 1;
+    {
+        m_ActiveEvents[node + BG_AV_NODES_MAX] = teamIdx * 2 + 1;
+        m_ActiveEvents[node + BG_AV_TOWERS_MAX] = teamIdx * BG_AV_MAX_GRAVETYPES;
+    }
 }
 
 void BattleGroundAV::DefendNode(BG_AV_Nodes node, BattleGroundTeamIndex teamIdx)
@@ -1570,7 +1577,6 @@ void BattleGroundAV::Reset()
     // set the reputation and honor variables:
     bool isBGWeekend = BattleGroundMgr::IsBGWeekend(GetTypeID());
 
-    m_HonorMapComplete    = (isBGWeekend) ? BG_AV_KILL_MAP_COMPLETE_HOLIDAY      : BG_AV_KILL_MAP_COMPLETE;
     m_RepTowerDestruction = (isBGWeekend) ? BG_AV_REP_TOWER_HOLIDAY              : BG_AV_REP_TOWER;
     m_RepCommander        = (isBGWeekend) ? BG_AV_REP_COMMANDER_HOLIDAY          : BG_AV_REP_COMMANDER;
     m_RepCaptain          = (isBGWeekend) ? BG_AV_REP_CAPTAIN_HOLIDAY            : BG_AV_REP_CAPTAIN;

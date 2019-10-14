@@ -67,6 +67,9 @@ enum EventAI_Type
     EVENT_T_MISSING_AURA            = 27,                   // Param1 = SpellID, Param2 = Number of time stacked expected, Param3/4 Repeat Min/Max
     EVENT_T_TARGET_MISSING_AURA     = 28,                   // Param1 = SpellID, Param2 = Number of time stacked expected, Param3/4 Repeat Min/Max
     EVENT_T_MOVEMENT_INFORM         = 29,                   // Param1 = motion type, Param2 = point ID, RepeatMin, RepeatMax
+    EVENT_T_LEAVE_COMBAT            = 30,                   // NONE
+    EVENT_T_MAP_SCRIPT_EVENT        = 31,                   // Param1 = EventID, Param2 = Data
+    EVENT_T_GROUP_MEMBER_DIED       = 32,                   // Param1 = CreatureId, Param2 = IsLeader
 
     EVENT_T_END,
 };
@@ -221,6 +224,18 @@ struct CreatureEventAI_Event
             uint32 repeatMin;
             uint32 repeatMax;
         } move_inform;
+        // EVENT_T_MAP_SCRIPT_EVENT                         = 31
+        struct
+        {
+            uint32 eventId;
+            uint32 data;
+        } map_event;
+        // EVENT_T_GROUP_MEMBER_DIED                        = 32
+        struct
+        {
+            uint32 creatureId;
+            uint32 isLeader;
+        } group_member_died;
         // RAW
         struct
         {
@@ -266,6 +281,7 @@ class MANGOS_DLL_SPEC CreatureEventAI : public CreatureAI
         void JustReachedHome() override;
         void EnterCombat(Unit *enemy) override;
         void EnterEvadeMode() override;
+        void OnCombatStop() override;
         void JustDied(Unit* killer) override;
         void KilledUnit(Unit* victim) override;
         void JustSummoned(Creature* pUnit) override;
@@ -276,20 +292,15 @@ class MANGOS_DLL_SPEC CreatureEventAI : public CreatureAI
         void DamageTaken(Unit* done_by, uint32& damage) override;
         void UpdateAI(const uint32 diff) override;
         void ReceiveEmote(Player* pPlayer, uint32 text_emote) override;
+        void GroupMemberJustDied(Creature* unit, bool isLeader) override;
         void SummonedCreatureJustDied(Creature* unit) override;
         void SummonedCreatureDespawn(Creature* unit) override;
+        void MapScriptEventHappened(ScriptedEvent* pEvent, uint32 uiData) override;
 
         static int Permissible(const Creature *);
 
         bool ProcessEvent(CreatureEventAIHolder& pHolder, Unit* pActionInvoker = nullptr);
         void ProcessAction(ScriptMap* action, uint32 EventId, Unit* pActionInvoker);
-        inline uint32 GetRandActionParam(uint32 rnd, uint32 param1, uint32 param2, uint32 param3);
-        inline int32 GetRandActionParam(uint32 rnd, int32 param1, int32 param2, int32 param3);
-
-        Unit* DoSelectLowestHpFriendly(float range, uint32 MinHPDiff);
-        void DoFindFriendlyMissingBuff(std::list<Creature*>& _list, float range, uint32 spellid);
-        void DoFindFriendlyCC(std::list<Creature*>& _list, float range);
-
         void SetInvincibilityHealthLevel(uint32 hp_level, bool is_percent);
 
         uint8  m_Phase;                                     // Current phase, max 32 phases
@@ -305,6 +316,9 @@ class MANGOS_DLL_SPEC CreatureEventAI : public CreatureAI
         float  m_AttackDistance;                            // Distance to attack from
         float  m_AttackAngle;                               // Angle of attack
         uint32 m_InvinceabilityHpLevel;                     // Minimal health level allowed at damage apply
+
+        void UpdateEventsOn_UpdateAI(const uint32 diff, bool Combat);
+        void UpdateEventsOn_MoveInLineOfSight(Unit* pWho);
 };
 
 #endif

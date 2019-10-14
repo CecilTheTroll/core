@@ -705,22 +705,37 @@ class MANGOS_DLL_SPEC PlayerTaxi
         bool LoadTaxiDestinationsFromString(const std::string& values, Team team);
         std::string SaveTaxiDestinationsToString() const;
 
-        void ClearTaxiDestinations() { m_TaxiDestinations.clear(); }
+        void ClearTaxiDestinations()
+        {
+            m_TaxiDestinations.clear();
+            m_taxiPath.clear();
+            m_discount = 1.0f;
+        }
         void AddTaxiDestination(uint32 dest) { m_TaxiDestinations.push_back(dest); }
+        void SetDiscount(float discount) { m_discount = discount; }
         uint32 GetTaxiSource() const { return m_TaxiDestinations.empty() ? 0 : m_TaxiDestinations.front(); }
         uint32 GetTaxiDestination() const { return m_TaxiDestinations.size() < 2 ? 0 : m_TaxiDestinations[1]; }
         uint32 GetCurrentTaxiPath() const;
+        uint32 GetCurrentTaxiCost() const;
         uint32 NextTaxiDestination()
         {
             m_TaxiDestinations.pop_front();
             return GetTaxiDestination();
+        };
+        TaxiPathNodeList const& GetTaxiPath() const { return m_taxiPath; };
+        void AddTaxiPathNode(TaxiPathNodeEntry const& entry)
+        {
+            m_taxiPath.resize(m_taxiPath.size() + 1);
+            m_taxiPath.set(m_taxiPath.size() - 1, &entry);
         }
         bool empty() const { return m_TaxiDestinations.empty(); }
 
         friend std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi);
     private:
+        float m_discount;
         TaxiMask m_taximask;
         std::deque<uint32> m_TaxiDestinations;
+        TaxiPathNodeList m_taxiPath;
 };
 
 std::ostringstream& operator<< (std::ostringstream& ss, PlayerTaxi const& taxi);
@@ -1181,7 +1196,7 @@ class MANGOS_DLL_SPEC Player final: public Unit
         Item* GetItemFromBuyBackSlot( uint32 slot );
         void RemoveItemFromBuyBackSlot( uint32 slot, bool del );
 
-        uint32 GetMaxKeyringSize() const { return KEYRING_SLOT_END-KEYRING_SLOT_START; }
+        uint32 GetMaxKeyringSize() const { return getLevel() < 40 ? 4 : (getLevel() < 50 ? 8 : 12); }
         void SendEquipError( InventoryResult msg, Item* pItem, Item *pItem2 = NULL, uint32 itemid = 0 ) const;
         void SendBuyError( BuyResult msg, Creature* pCreature, uint32 item, uint32 param );
         void SendSellError( SellResult msg, Creature* pCreature, ObjectGuid itemGuid, uint32 param );
@@ -1574,8 +1589,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         uint32 GetSpellByProto(ItemPrototype *proto);
 
-        float GetHealthBonusFromStamina();
-        float GetManaBonusFromIntellect();
+        float GetHealthBonusFromStamina(float stamina);
+        float GetManaBonusFromIntellect(float intellect);
 
         bool UpdateStats(Stats stat);
         bool UpdateAllStats();
@@ -1619,8 +1634,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
         void SendLogXPGain(uint32 GivenXP,Unit* victim,uint32 RestXP);
 
 
-        uint8 LastSwingErrorMsg() const { return m_swingErrorMsg; }
-        void SwingErrorMsg(uint8 val) { m_swingErrorMsg = val; }
+        AutoAttackCheckResult GetLastSwingErrorMsg() const { return m_swingErrorMsg; }
+        void SetSwingErrorMsg(AutoAttackCheckResult val) { m_swingErrorMsg = val; }
 
         // notifiers
         void SendAttackSwingCantAttack();
@@ -1630,12 +1645,15 @@ class MANGOS_DLL_SPEC Player final: public Unit
         void SendAttackSwingNotInRange();
         void SendAttackSwingBadFacingAttack();
         void SendAutoRepeatCancel();
+        void SendFeignDeathResisted();
         void SendExplorationExperience(uint32 Area, uint32 Experience);
+        void SendFactionAtWar(uint32 reputationId, bool apply);
+        AutoAttackCheckResult CanAutoAttackTarget(Unit const*) const override;
 
         void ResetInstances(InstanceResetMethod method);
         void SendResetInstanceSuccess(uint32 MapId);
         void SendResetInstanceFailed(uint32 reason, uint32 MapId);
-        void SendResetFailedNotify(uint32 mapid);
+        void SendResetFailedNotify();
         bool CheckInstanceCount(uint32 instanceId);
         void AddInstanceEnterTime(uint32 instanceId, time_t enterTime);
 
@@ -1697,11 +1715,17 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool IsBeingTeleported() const { return mSemaphoreTeleport_Near || mSemaphoreTeleport_Far || mPendingFarTeleport; }
         bool IsBeingTeleportedNear() const { return mSemaphoreTeleport_Near; }
         bool IsBeingTeleportedFar() const { return mSemaphoreTeleport_Far; }
-        bool IsPendingFarTeleport() const { return mPendingFarTeleport; }
         void SetSemaphoreTeleportNear(bool semphsetting);
         void SetSemaphoreTeleportFar(bool semphsetting);
         void SetPendingFarTeleport(bool pending) { mPendingFarTeleport = pending; }
         void ProcessDelayedOperations();
+
+        bool IsHasDelayedTeleport() const
+        {
+            // we should not execute delayed teleports for now dead players but has been alive at teleport
+            // because we don't want player's ghost teleported from graveyard
+            return m_bHasDelayedTeleport && (isAlive() || !m_bHasBeenAliveAtDelayedTeleport);
+        }
 
         void CheckAreaExploreAndOutdoor(void);
 
@@ -2056,6 +2080,11 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool CanSwim() const { return true; }
         bool CanFly() const { return IsFlying(); }
 
+        void SetFly(bool enable) override;
+        void SetFeatherFall(bool enable) override;
+        void SetHover(bool enable) override;
+        void SetWaterWalk(bool enable) override;
+
         uint32 watching_cinematic_entry;
         Position cinematic_start;
         Position const* cinematic_current_waypoint;
@@ -2178,11 +2207,11 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         inline bool HasScheduledEvent() const { return m_Events.HasScheduledEvent(); }
         void SetAutoInstanceSwitch(bool v) { m_enableInstanceSwitch = v; }
-        void SetPendingInstanceSwitch(bool v) { m_pendingInstanceSwitch = v; }
-        bool IsPendingInstanceSwitch() const { return m_pendingInstanceSwitch; }
+
+        void SetEscortingGuid(const ObjectGuid& guid) { _escortingGuid = guid; }
+        const ObjectGuid& GetEscortingGuid() const { return _escortingGuid; }
     protected:
         bool   m_enableInstanceSwitch;
-        bool   m_pendingInstanceSwitch;
         uint32 m_skippedUpdateTime;
         uint32 m_DetectInvTimer;
 
@@ -2241,7 +2270,7 @@ class MANGOS_DLL_SPEC Player final: public Unit
         void _LoadActions(QueryResult *result);
         void _LoadAuras(QueryResult *result, uint32 timediff);
         void _LoadBoundInstances(QueryResult *result);
-        void _LoadInventory(QueryResult *result, uint32 timediff);
+        void _LoadInventory(QueryResult *result, uint32 timediff, bool& has_epic_mount);
         void _LoadItemLoot(QueryResult *result);
         void _LoadMails(QueryResult *result);
         void _LoadMailedItems(QueryResult *result);
@@ -2350,7 +2379,7 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool m_canParry;
         bool m_canBlock;
         bool m_canDualWield;
-        uint8 m_swingErrorMsg;
+        AutoAttackCheckResult m_swingErrorMsg;
         float m_ammoDPS;
 
         ////////////////////Rest System/////////////////////
@@ -2390,7 +2419,6 @@ class MANGOS_DLL_SPEC Player final: public Unit
         bool m_justBoarded;
         void SetJustBoarded(bool hasBoarded) { m_justBoarded = hasBoarded; }
         bool HasJustBoarded() { return m_justBoarded; }
-
     private:
         // internal common parts for CanStore/StoreItem functions
         InventoryResult _CanStoreItem_InSpecificSlot( uint8 bag, uint8 slot, ItemPosCountVec& dest, ItemPrototype const *pProto, uint32& count, bool swap, Item *pSrcItem ) const;
@@ -2400,14 +2428,9 @@ class MANGOS_DLL_SPEC Player final: public Unit
 
         void UpdateKnownCurrencies(uint32 itemId, bool apply);
         void AdjustQuestReqItemCount( Quest const* pQuest, QuestStatusData& questStatusData );
+        void UpdateOldRidingSkillToNew(bool has_epic_mount);
 
         void SetCanDelayTeleport(bool setting) { m_bCanDelayTeleport = setting; }
-        bool IsHasDelayedTeleport() const
-        {
-            // we should not execute delayed teleports for now dead players but has been alive at teleport
-            // because we don't want player's ghost teleported from graveyard
-            return m_bHasDelayedTeleport && (isAlive() || !m_bHasBeenAliveAtDelayedTeleport);
-        }
 
         bool SetDelayedTeleportFlagIfCan()
         {
@@ -2473,6 +2496,8 @@ class MANGOS_DLL_SPEC Player final: public Unit
         int32 m_cannotBeDetectedTimer;
 
         uint32 m_bNextRelocationsIgnored;
+
+        ObjectGuid _escortingGuid;
 
 public:
         /**

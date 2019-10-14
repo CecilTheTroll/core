@@ -34,6 +34,10 @@ void CreatureAI::JustRespawned()
 {
     // Reset spells template to default on respawn.
     SetSpellsTemplate(m_creature->GetCreatureInfo()->spells_template);
+
+    // Reset combat movement and melee attack.
+    m_bCombatMovement = true;
+    m_bMeleeAttack = true;
 }
 
 void CreatureAI::AttackedBy(Unit* attacker)
@@ -120,9 +124,6 @@ CanCastResult CreatureAI::DoCastSpellIfCan(Unit* pTarget, uint32 uiSpell, uint32
 
     Unit* pCaster = m_creature;
 
-    if (uiCastFlags & CF_TARGET_CASTS_ON_SELF)
-        pCaster = pTarget;
-
     // Allowed to cast only if not casting (unless we interrupt ourself) or if spell is triggered
     if (!pCaster->IsNonMeleeSpellCasted(false) || uiCastFlags & (CF_TRIGGERED | CF_INTERRUPT_PREVIOUS))
     {
@@ -136,7 +137,7 @@ CanCastResult CreatureAI::DoCastSpellIfCan(Unit* pTarget, uint32 uiSpell, uint32
             }
 
             // Check if cannot cast spell
-            if (!(uiCastFlags & (CF_TARGET_CASTS_ON_SELF | CF_FORCE_CAST)))
+            if (!(uiCastFlags & CF_FORCE_CAST))
             {
                 CanCastResult castResult = CanCastSpell(pTarget, pSpell, uiCastFlags & CF_TRIGGERED);
 
@@ -188,37 +189,56 @@ void CreatureAI::DoSpellTemplateCasts(const uint32 uiDiff)
     {
         if (spell.cooldown <= uiDiff)
         {
-            // we roll to see if we cast this time
-            if (spell.probability <= rand() % 100)
-            {
-                spell.cooldown = urand(spell.delayRepeatMin, spell.delayRepeatMax);
+            if (m_creature->IsNonMeleeSpellCasted(false) && !(spell.castFlags & (CF_TRIGGERED | CF_INTERRUPT_PREVIOUS)))
                 continue;
-            }
 
-            Unit* spellTarget = ToUnit(GetTargetByType(m_creature, m_creature, spell.castTarget, spell.spellId));
+            // Checked on startup.
+            const SpellEntry* pSpellInfo = sSpellMgr.GetSpellEntry(spell.spellId);
 
-            CanCastResult result = DoCastSpellIfCan(spellTarget, spell.spellId, spell.castFlags);
+            Unit* pTarget = ToUnit(GetTargetByType(m_creature, m_creature, spell.castTarget, spell.targetParam1 ? spell.targetParam1 : sSpellRangeStore.LookupEntry(pSpellInfo->rangeIndex)->maxRange, spell.targetParam2));
+
+            SpellCastResult result = m_creature->TryToCast(pTarget, pSpellInfo, spell.castFlags, spell.probability);
             
-            if (result == CAST_OK)
+            switch (result)
             {
-                spell.cooldown = urand(spell.delayRepeatMin, spell.delayRepeatMax);
-
-                if (spell.castFlags & CF_MAIN_RANGED_SPELL)
+                case SPELL_CAST_OK:
                 {
-                    SetCombatMovement(false);
-                    SetMeleeAttack(false);
+                    spell.cooldown = urand(spell.delayRepeatMin, spell.delayRepeatMax);
+
+                    if (spell.castFlags & CF_MAIN_RANGED_SPELL)
+                    {
+                        if (m_creature->IsMoving())
+                            m_creature->StopMoving();
+
+                        SetCombatMovement(false);
+                        SetMeleeAttack(false);
+                    }
+
+                    // If there is a script for this spell, run it.
+                    if (spell.scriptId)
+                        m_creature->GetMap()->ScriptsStart(sCreatureSpellScripts, spell.scriptId, m_creature, pTarget);
+                    break;
                 }
-
-                // If there is a script for this spell, run it.
-                if (spell.scriptId)
-                    m_creature->GetMap()->ScriptsStart(sCreatureSpellScripts, spell.scriptId, m_creature, spellTarget);
-            }
-            else if (result != CAST_FAIL_IS_CASTING)
-            {
-                if (spell.castFlags & CF_MAIN_RANGED_SPELL)
+                case SPELL_FAILED_SPELL_IN_PROGRESS:
                 {
-                    SetCombatMovement(true);
-                    SetMeleeAttack(true);
+                    // If we are casting, do nothing so it will try again on next update.
+                    break;
+                }
+                case SPELL_FAILED_TRY_AGAIN:
+                {
+                    // Chance roll failed, so we reset cooldown.
+                    spell.cooldown = urand(spell.delayRepeatMin, spell.delayRepeatMax);
+                    // no break
+                }
+                default:
+                {
+                    // other error
+                    if (spell.castFlags & CF_MAIN_RANGED_SPELL)
+                    {
+                        SetCombatMovement(true);
+                        SetMeleeAttack(true);
+                    }
+                    break;
                 }
             }
         }
@@ -309,11 +329,6 @@ void CreatureAI::DoCast(Unit* victim, uint32 spellId, bool triggered)
     m_creature->CastSpell(victim, spellId, triggered);
 }
 
-void CreatureAI::DoCastVictim(uint32 spellId, bool triggered)
-{
-    m_creature->CastSpell(m_creature->getVictim(), spellId, triggered);
-}
-
 void CreatureAI::DoCastAOE(uint32 spellId, bool triggered)
 {
     if (!triggered && m_creature->IsNonMeleeSpellCasted(false))
@@ -324,7 +339,7 @@ void CreatureAI::DoCastAOE(uint32 spellId, bool triggered)
 
 bool CreatureAI::DoMeleeAttackIfReady()
 {
-    return m_MeleeEnabled ? m_creature->UpdateMeleeAttackingState() : false;
+    return m_bMeleeAttack ? m_creature->UpdateMeleeAttackingState() : false;
 }
 
 struct EnterEvadeModeHelper
@@ -348,23 +363,26 @@ struct EnterEvadeModeHelper
 
 void CreatureAI::SetMeleeAttack(bool enabled)
 {
-    if (m_MeleeEnabled == enabled)
+    if (m_bMeleeAttack == enabled)
         return;
 
-    m_MeleeEnabled = enabled;
+    m_bMeleeAttack = enabled;
 
-    if (enabled)
-        m_creature->SendMeleeAttackStart(m_creature->getVictim());
-    else
-        m_creature->SendMeleeAttackStop(m_creature->getVictim());
+    if (Unit* pVictim = m_creature->getVictim())
+    { 
+        if (enabled)
+            m_creature->SendMeleeAttackStart(pVictim);
+        else
+            m_creature->SendMeleeAttackStop(pVictim);
+    }
 }
 
 void CreatureAI::SetCombatMovement(bool enabled)
 {
-    if (m_CombatMovementEnabled == enabled)
+    if (m_bCombatMovement == enabled)
         return;
 
-    m_CombatMovementEnabled = enabled;
+    m_bCombatMovement = enabled;
 
     if (Unit* pVictim = m_creature->getVictim())
     {
@@ -375,14 +393,20 @@ void CreatureAI::SetCombatMovement(bool enabled)
     }
 }
 
-void CreatureAI::EnterEvadeMode()
+void CreatureAI::OnCombatStop()
 {
     // Reset back to default spells template. This also resets timers.
     SetSpellsTemplate(m_creature->GetCreatureInfo()->spells_template);
 
+    // Reset combat movement and melee attack.
+    m_bCombatMovement = true;
+    m_bMeleeAttack = true;
+}
+
+void CreatureAI::EnterEvadeMode()
+{
     if (!m_creature->isAlive())
     {
-        DEBUG_FILTER_LOG(LOG_FILTER_AI_AND_MOVEGENSS, "Creature stopped attacking, he is dead [guid=%u]", m_creature->GetGUIDLow());
         m_creature->CombatStop(true);
         m_creature->DeleteThreatList();
         return;

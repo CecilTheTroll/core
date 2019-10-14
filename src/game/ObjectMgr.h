@@ -139,18 +139,25 @@ struct SoundEntriesEntry
     std::string     Name;
 };
 
+// Number of spells in one template
+#define CREATURE_SPELLS_MAX_SPELLS 8
+// Columns in the db for each spell
+#define CREATURE_SPELLS_MAX_COLUMNS 11
+
 struct CreatureSpellsEntry
 {
     const uint16 spellId;
     const uint8  probability;
     const uint8  castTarget;
+    const uint32 targetParam1;
+    const uint32 targetParam2;
     const uint8  castFlags;
     const uint32 delayInitialMin;
     const uint32 delayInitialMax;
     const uint32 delayRepeatMin;
     const uint32 delayRepeatMax;
     const uint32 scriptId;
-    CreatureSpellsEntry(uint16 Id, uint8 Probability, uint8 CastTarget, uint8 CastFlags, uint32 InitialMin, uint32 InitialMax, uint32 RepeatMin, uint32 RepeatMax, uint32 ScriptId) : spellId(Id), probability(Probability), castTarget(CastTarget), castFlags(CastFlags), delayInitialMin(InitialMin), delayInitialMax(InitialMax), delayRepeatMin(RepeatMin), delayRepeatMax(RepeatMax), scriptId(ScriptId) {}
+    CreatureSpellsEntry(uint16 Id, uint8 Probability, uint8 CastTarget, uint32 TargetParam1, uint32 TargetParam2, uint8 CastFlags, uint32 InitialMin, uint32 InitialMax, uint32 RepeatMin, uint32 RepeatMax, uint32 ScriptId) : spellId(Id), probability(Probability), castTarget(CastTarget), targetParam1(TargetParam1), targetParam2(TargetParam2), castFlags(CastFlags), delayInitialMin(InitialMin), delayInitialMax(InitialMax), delayRepeatMin(RepeatMin), delayRepeatMax(RepeatMax), scriptId(ScriptId) {}
 };
 
 typedef std::vector<CreatureSpellsEntry> CreatureSpellsTemplate;
@@ -196,6 +203,12 @@ enum
     QUESTGIVER_CREATURE = 0,
     QUESTGIVER_GAMEOBJECT = 1,
     QUESTGIVER_TYPE_MAX = 2,
+};
+
+struct TrainerGreetingLocale
+{
+    TrainerGreetingLocale() { }
+    std::vector<std::string> Content;                       // 0 -> default, i -> i-1 locale index
 };
 
 typedef UNORDERED_MAP<uint32,CreatureData> CreatureDataMap;
@@ -254,6 +267,7 @@ typedef UNORDERED_MAP<uint32,QuestGreetingLocale> QuestGreetingLocaleMap;
 typedef UNORDERED_MAP<uint32,GossipMenuItemsLocale> GossipMenuItemsLocaleMap;
 typedef UNORDERED_MAP<uint32,PointOfInterestLocale> PointOfInterestLocaleMap;
 typedef UNORDERED_MAP<uint32,AreaLocale> AreaLocaleMap;
+typedef UNORDERED_MAP<uint32, TrainerGreetingLocale> TrainerGreetingLocaleMap;
 
 typedef std::multimap<int32, uint32> ExclusiveQuestGroupsMap;
 typedef std::multimap<uint32, ItemRequiredTarget> ItemRequiredTargetMap;
@@ -346,19 +360,6 @@ struct PetCreateSpellEntry
     uint32 spellid[4];
 };
 
-#define WEATHER_SEASONS 4
-struct WeatherSeasonChances
-{
-    uint32 rainChance;
-    uint32 snowChance;
-    uint32 stormChance;
-};
-
-struct WeatherZoneChances
-{
-    WeatherSeasonChances data[WEATHER_SEASONS];
-};
-
 struct GraveYardData
 {
     uint32 safeLocId;
@@ -366,6 +367,17 @@ struct GraveYardData
 };
 typedef std::multimap<uint32, GraveYardData> GraveYardMap;
 typedef std::pair<GraveYardMap::const_iterator, GraveYardMap::const_iterator> GraveYardMapBounds;
+
+struct TaxiPathTransition
+{
+    uint32 inPath;
+    uint32 outPath;
+    uint32 inNode;
+    uint32 outNode;
+};
+
+typedef std::multimap<uint32, TaxiPathTransition> TaxiPathTransitionsMap;
+typedef std::pair<TaxiPathTransitionsMap::const_iterator, TaxiPathTransitionsMap::const_iterator> TaxiPathTransitionsMapBounds;
 
 // NPC gossip text id
 typedef UNORDERED_MAP<uint32, uint32> CacheNpcTextIdMap;
@@ -389,7 +401,7 @@ SkillRangeType GetSkillRangeType(SkillLineEntry const *pSkill, bool racial);
 #define MAX_PET_NAME             12                         // max allowed by client name length
 #define MAX_CHARTER_NAME         24                         // max allowed by client name length
 
-bool normalizePlayerName(std::string& name);
+bool normalizePlayerName(std::string& name, size_t max_len = MAX_INTERNAL_PLAYER_NAME);
 
 struct MANGOS_DLL_SPEC LanguageDesc
 {
@@ -471,7 +483,7 @@ enum PermVariables
     VAR_PERM_4      = 30007,
 
     DEF_ALIVE_COUNT = 4,        // default alive dragons count for VAR_ALIVE_COUNT
-    DEF_STOP_DELAY  = 5,        // default times event check will not stop the event
+    DEF_STOP_DELAY  = 20,        // default times event check will not stop the event
 
     NPC_YSONDRE     = 14887,
     NPC_LETHON      = 14888,
@@ -556,12 +568,13 @@ class ObjectMgr
 
         // Stores all existing ids in the database, not necessarily valid or loaded.
         void LoadAllIdentifiers();
-        bool IsExistingItemId(uint32 id) { return (m_ItemIdSet.find(id) != m_ItemIdSet.end()); }
-        bool IsExistingQuestId(uint32 id) { return (m_QuestIdSet.find(id) != m_QuestIdSet.end()); }
-        bool IsExistingCreatureId(uint32 id) { return (m_CreatureIdSet.find(id) != m_CreatureIdSet.end()); }
-        bool IsExistingGameObjectId(uint32 id) { return (m_GameObjectIdSet.find(id) != m_GameObjectIdSet.end()); }
-        bool IsExistingCreatureGuid(uint32 id) { return (m_CreatureGuidSet.find(id) != m_CreatureGuidSet.end()); }
-        bool IsExistingGameObjectGuid(uint32 id) { return (m_GameObjectGuidSet.find(id) != m_GameObjectGuidSet.end()); }
+        bool IsExistingItemId(uint32 id) const { return (m_ItemIdSet.find(id) != m_ItemIdSet.end()); }
+        bool IsExistingQuestId(uint32 id) const { return (m_QuestIdSet.find(id) != m_QuestIdSet.end()); }
+        bool IsExistingCreatureId(uint32 id) const { return (m_CreatureIdSet.find(id) != m_CreatureIdSet.end()); }
+        bool IsExistingGameObjectId(uint32 id) const { return (m_GameObjectIdSet.find(id) != m_GameObjectIdSet.end()); }
+        bool IsExistingCreatureGuid(uint32 id) const { return (m_CreatureGuidSet.find(id) != m_CreatureGuidSet.end()); }
+        bool IsExistingGameObjectGuid(uint32 id) const { return (m_GameObjectGuidSet.find(id) != m_GameObjectGuidSet.end()); }
+        bool IsExistingSpellId(uint32 id) const { return (m_SpellIdSet.find(id) != m_SpellIdSet.end()); }
 
         typedef UNORDERED_MAP<uint32, Item*> ItemMap;
 
@@ -577,8 +590,6 @@ class ObjectMgr
         typedef UNORDERED_MAP<uint32, RepSpilloverTemplate> RepSpilloverTemplateMap;
 
         typedef UNORDERED_MAP<uint32, PointOfInterest> PointOfInterestMap;
-
-        typedef UNORDERED_MAP<uint32, WeatherZoneChances> WeatherZoneMap;
 
         typedef UNORDERED_MAP<uint32, PetCreateSpellEntry> PetCreateSpellMap;
 
@@ -608,7 +619,6 @@ class ObjectMgr
         uint32 GetCreatureModelOtherTeamModel(uint32 modelId);
 
         EquipmentInfo const *GetEquipmentInfo( uint32 entry );
-        EquipmentInfoRaw const *GetEquipmentInfoRaw( uint32 entry );
         static CreatureDataAddon const *GetCreatureAddon( uint32 lowguid )
         {
             return sCreatureDataAddonStorage.LookupEntry<CreatureDataAddon>(lowguid);
@@ -650,6 +660,12 @@ class ObjectMgr
         uint32 GetNearestTaxiNode( float x, float y, float z, uint32 mapid, Team team );
         void GetTaxiPath( uint32 source, uint32 destination, uint32 &path, uint32 &cost);
         uint32 GetTaxiMountDisplayId( uint32 id, Team team, bool allowed_alt_team = false);
+
+        void LoadTaxiPathTransitions();
+        TaxiPathTransitionsMapBounds GetTaxiPathTransitionsMapBounds(uint32 entry) const
+        {
+            return m_TaxiPathTransitions.equal_range(entry);
+        }
 
         Quest const* GetQuestTemplate(uint32 quest_id) const
         {
@@ -765,6 +781,7 @@ class ObjectMgr
         void LoadBroadcastTexts();
         void LoadBroadcastTextLocales();
         bool LoadQuestGreetings();
+        bool LoadTrainerGreetings();
         void LoadPetCreateSpells();
         void LoadCreatureLocales();
         void LoadCreatureTemplates();
@@ -814,7 +831,6 @@ class ObjectMgr
 
         void LoadPointsOfInterest();
 
-        void LoadWeatherZoneChances();
         void LoadGameTele();
 
         void LoadNpcGossips();
@@ -875,14 +891,6 @@ class ObjectMgr
             if ( itr != mItemTexts.end() )
                 return itr->second;
             return "There is no info for this item";
-        }
-
-        WeatherZoneChances const* GetWeatherChances(uint32 zone_id) const
-        {
-            auto itr = mWeatherZoneMap.find(zone_id);
-            if(itr != mWeatherZoneMap.end())
-                return &itr->second;
-            return nullptr;
         }
 
         CreatureDataPair const* GetCreatureDataPair(uint32 guid) const
@@ -1042,6 +1050,13 @@ class ObjectMgr
             return &itr->second;
         }
 
+        TrainerGreetingLocale const* GetTrainerGreetingLocale(uint32 entry) const
+        {
+            auto itr = mTrainerGreetingLocaleMap.find(entry);
+            if (itr == mTrainerGreetingLocaleMap.end()) return nullptr;
+            return &itr->second;
+        }
+
         // global grid objects state (static DB spawns, global spawn mods from gameevent system)
         CellObjectGuids const& GetCellObjectGuids(uint16 mapid, uint32 cell_id)
         {
@@ -1076,8 +1091,7 @@ class ObjectMgr
         int GetIndexForLocale(LocaleConstant loc);
         LocaleConstant GetLocaleForIndex(int i);
 
-        uint16 GetConditionId(ConditionType condition, uint32 value1, uint32 value2);
-        bool IsConditionSatisfied(uint16 conditionId, WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const;
+        bool IsConditionSatisfied(uint32 conditionId, WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const;
 
         GameTele const* GetGameTele(uint32 id) const
         {
@@ -1136,7 +1150,7 @@ class ObjectMgr
             return &iter->second;
         }
 
-        void AddVendorItem(uint32 entry,uint32 item, uint32 maxcount, uint32 incrtime);
+        void AddVendorItem(uint32 entry,uint32 item, uint32 maxcount, uint32 incrtime, uint32 itemflags);
         bool RemoveVendorItem(uint32 entry,uint32 item);
         bool IsVendorItemValid(bool isTemplate, char const* tableName, uint32 vendor_entry, uint32 item, uint32 maxcount, uint32 ptime, Player* pl = nullptr, std::set<uint32>* skip_vendors = nullptr) const;
 
@@ -1324,8 +1338,6 @@ class ObjectMgr
         GossipMenuItemsMap  m_mGossipMenuItemsMap;
         PointOfInterestMap  mPointsOfInterest;
 
-        WeatherZoneMap      mWeatherZoneMap;
-
         PetCreateSpellMap   mPetCreateSpell;
 
         //character reserved names
@@ -1348,6 +1360,8 @@ class ObjectMgr
         QuestRelationsMap       m_GOQuestRelations;
         QuestRelationsMap       m_GOQuestInvolvedRelations;
 
+        TaxiPathTransitionsMap  m_TaxiPathTransitions;
+
         int DBCLocaleIndex;
 
         uint32 m_OldMailCounter;
@@ -1366,6 +1380,7 @@ class ObjectMgr
         std::set<uint32> m_GameObjectIdSet;
         std::set<uint32> m_CreatureGuidSet;
         std::set<uint32> m_GameObjectGuidSet;
+        std::set<uint32> m_SpellIdSet;
 
         typedef std::map<uint32,PetLevelInfo*> PetLevelInfoMap;
         // PetLevelInfoMap[creature_id][level]
@@ -1404,6 +1419,8 @@ class ObjectMgr
         MangosStringLocaleMap mMangosStringLocaleMap;
         BroadcastTextLocaleMap mBroadcastTextLocaleMap;
         QuestGreetingLocaleMap mQuestGreetingLocaleMap[QUESTGIVER_TYPE_MAX];
+        TrainerGreetingLocaleMap m_trainerGreetingMap;
+        TrainerGreetingLocaleMap mTrainerGreetingLocaleMap;
         GossipMenuItemsLocaleMap mGossipMenuItemsLocaleMap;
         PointOfInterestLocaleMap mPointOfInterestLocaleMap;
         AreaLocaleMap mAreaLocaleMap;

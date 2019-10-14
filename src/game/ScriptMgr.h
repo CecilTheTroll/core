@@ -68,6 +68,7 @@ enum eScriptCommand
                                                             // datalong2 = time
                                                             // datalong3 = movement_options (see enum MoveOptions)
                                                             // datalong4 = eMoveToFlags
+                                                            // dataint = path_id
                                                             // x/y/z/o = coordinates
     SCRIPT_COMMAND_MODIFY_FLAGS             = 4,            // source = Object
                                                             // datalong = field_id
@@ -84,6 +85,7 @@ enum eScriptCommand
                                                             // target = WorldObject (from provided source or target)
                                                             // datalong = quest_id
                                                             // datalong2 = distance or 0
+                                                            // datalong3 = (bool) group
     SCRIPT_COMMAND_KILL_CREDIT              = 8,            // source = Player (from provided source or target)
                                                             // datalong = creature entry
                                                             // datalong2 = bool (0=personal credit, 1=group credit)
@@ -97,7 +99,7 @@ enum eScriptCommand
                                                             // datalong3 = unique_limit
                                                             // datalong4 = unique_distance
                                                             // dataint = eSummonCreatureFlags
-                                                            // dataint2 = eSummonCreatureFacingOptions
+                                                            // dataint2 = script_id
                                                             // dataint3 = attack_target (see enum Target)
                                                             // dataint4 = despawn_type (see enum TempSummonType)
                                                             // x/y/z/o = coordinates
@@ -135,6 +137,7 @@ enum eScriptCommand
                                                             // datalong = see enum MovementGeneratorType (not all are supported)
                                                             // datalong2 = bool_param (meaning depends on the motion type)
                                                             // datalong3 = int_param (meaning depends on the motion type)
+                                                            // datalong4 = (bool) clear
                                                             // x = distance (only for some motion types)
                                                             // o = angle (only for some motion types)
     SCRIPT_COMMAND_SET_ACTIVEOBJECT         = 21,           // source = Creature
@@ -148,6 +151,7 @@ enum eScriptCommand
     SCRIPT_COMMAND_MOUNT_TO_ENTRY_OR_MODEL  = 24,           // source = Creature
                                                             // datalong = creature entry/modelid (depend on datalong2)
                                                             // datalong2 = (bool) is_display_id
+                                                            // datalong3 = (bool) permanent
     SCRIPT_COMMAND_SET_RUN                  = 25,           // source = Creature
                                                             // datalong = (bool) 0 = off, 1 = on
     SCRIPT_COMMAND_ATTACK_START             = 26,           // source = Creature
@@ -172,7 +176,7 @@ enum eScriptCommand
                                                             // datalong3 = eTerminateConditionFlags
     SCRIPT_COMMAND_ENTER_EVADE_MODE         = 33,           // source = Creature
     SCRIPT_COMMAND_SET_HOME_POSITION        = 34,           // source = Creature
-                                                            // datalong = (bool) use_current_position
+                                                            // datalong = eSetHomePositionOptions
                                                             // x/y/z/o = coordinates
     SCRIPT_COMMAND_TURN_TO                  = 35,           // source = Unit
                                                             // target = WorldObject
@@ -234,7 +238,80 @@ enum eScriptCommand
                                                             // datalong1-4 = creature_spells id
                                                             // dataint1-4 = chance (total cant be above 100)
     SCRIPT_COMMAND_REMOVE_GUARDIANS         = 56,           // source = Unit
-
+                                                            // datalong = creature_id
+    SCRIPT_COMMAND_ADD_SPELL_COOLDOWN       = 57,           // source = Unit
+                                                            // datalong = spell_id
+                                                            // datalong2 = cooldown
+    SCRIPT_COMMAND_REMOVE_SPELL_COOLDOWN    = 58,           // source = Unit
+                                                            // datalong = spell_id
+    SCRIPT_COMMAND_SET_REACT_STATE          = 59,           // source = Creature
+                                                            // datalong = see enum ReactStates
+    SCRIPT_COMMAND_START_WAYPOINTS          = 60,           // source = Creature
+                                                            // datalong = waypoints_source
+                                                            // datalong2 = start_point
+                                                            // datalong3 = initial_delay
+                                                            // datalong4 = (bool) repeat
+                                                            // dataint = path_id
+                                                            // dataint2 = overwrite_entry
+    SCRIPT_COMMAND_START_MAP_EVENT          = 61,           // source = Map
+                                                            // datalong = event_id
+                                                            // datalong2 = time_limit
+                                                            // dataint = success_condition
+                                                            // dataint2 = success_script
+                                                            // dataint3 = failure_condition
+                                                            // dataint4 = failure_script
+    SCRIPT_COMMAND_END_MAP_EVENT            = 62,           // source = Map
+                                                            // datalong = event_id
+                                                            // datalong2 = (bool) success
+    SCRIPT_COMMAND_ADD_MAP_EVENT_TARGET     = 63,           // source = Map
+                                                            // target = WorldObject
+                                                            // datalong = event_id
+                                                            // dataint = success_condition
+                                                            // dataint2 = success_script
+                                                            // dataint3 = failure_condition
+                                                            // dataint4 = failure_script
+    SCRIPT_COMMAND_REMOVE_MAP_EVENT_TARGET  = 64,           // source = Map
+                                                            // target = WorldObject
+                                                            // datalong = event_id
+                                                            // datalong2 = condition_id
+                                                            // datalong3 = eRemoveMapEventTargetOptions
+    SCRIPT_COMMAND_SET_MAP_EVENT_DATA       = 65,           // source = Map
+                                                            // datalong = event_id
+                                                            // datalong2 = index
+                                                            // datalong3 = data
+                                                            // datalong4 = eSetMapScriptDataOptions
+    SCRIPT_COMMAND_SEND_MAP_EVENT           = 66,           // source = Map
+                                                            // datalong = event_id
+                                                            // datalong2 = data
+                                                            // datalong3 = eSendMapEventOptions
+    SCRIPT_COMMAND_SET_DEFAULT_MOVEMENT     = 67,           // source = Creature
+                                                            // datalong = movement_type
+                                                            // datalong2 = (bool) always_replace
+                                                            // datalong3 = param1
+    SCRIPT_COMMAND_START_SCRIPT_FOR_ALL     = 68,           // source = WorldObject
+                                                            // datalong = script_id
+                                                            // datalong2 = eStartScriptForAllOptions
+                                                            // datalong3 = object_entry
+                                                            // datalong4 = search_radius
+    SCRIPT_COMMAND_EDIT_MAP_EVENT           = 69,           // source = Map
+                                                            // datalong = event_id
+                                                            // dataint = success_condition
+                                                            // dataint2 = success_script
+                                                            // dataint3 = failure_condition
+                                                            // dataint4 = failure_script
+    SCRIPT_COMMAND_FAIL_QUEST               = 70,           // source = Player
+                                                            // datalong = quest_id
+    SCRIPT_COMMAND_RESPAWN_CREATURE         = 71,           // source = Creature
+                                                            // datalong = (bool) even_if_alive
+    SCRIPT_COMMAND_ASSIST_UNIT              = 72,           // source = Creature
+                                                            // target = Unit
+    SCRIPT_COMMAND_COMBAT_STOP              = 73,           // source = Unit
+    SCRIPT_COMMAND_ADD_AURA                 = 74,           // source = Unit
+                                                            // datalong = spell_id
+                                                            // datalong2 = flags
+    SCRIPT_COMMAND_ADD_THREAT               = 75,           // source = Creature
+                                                            // target = Unit
+    
     SCRIPT_COMMAND_MAX,
 
     SCRIPT_COMMAND_DISABLED                 = 9999          // Script action was disabled during loading.
@@ -278,13 +355,6 @@ enum eSummonCreatureFlags
     SF_SUMMONCREATURE_UNIQUE_TEMP = 0x8                          // same as 0x10 but check for TempSummon only creatures
 };
 
-// Possible dataint2 values for SCRIPT_COMMAND_TEMP_SUMMON_CREATURE
-enum eSummonCreatureFacingOptions
-{
-    SO_SUMMONCREATURE_FACE_SUMMONER = 1,                         // Creature will face the summoner.
-    SO_SUMMONCREATURE_FACE_TARGET   = 2                          // Creature will face the provided target object.
-};
-
 // Flags used by SCRIPT_COMMAND_PLAY_SOUND
 enum ePlaySoundFlags
 {
@@ -310,6 +380,14 @@ enum eTerminateScriptOptions
 enum eTerminateConditionFlags
 {
     SF_TERMINATECONDITION_WHEN_FALSE = 0x1
+};
+
+// Possible datalong values for SCRIPT_COMMAND_SET_HOME_POSITION
+enum eSetHomePositionOptions
+{
+    SO_SETHOME_PROVIDED_POSITION = 0,
+    SO_SETHOME_CURRENT_POSITION  = 1,
+    SO_SETHOME_DEFAULT_POSITION  = 2
 };
 
 // Possible datalong values for SCRIPT_COMMAND_TURN_TO
@@ -341,11 +419,53 @@ enum eSetInstData64Options
 // Possible datalong values for SCRIPT_COMMAND_SET_PHASE
 enum eSetPhaseOptions
 {
-    SO_SETPHASE_RAW = 0,
+    SO_SETPHASE_RAW       = 0,
     SO_SETPHASE_INCREMENT = 1,
     SO_SETPHASE_DECREMENT = 2,
 
     SO_SETPHASE_MAX
+};
+
+// Possible datalong3 values for SCRIPT_COMMAND_REMOVE_MAP_EVENT_TARGET
+enum eRemoveMapEventTargetOptions
+{
+    SO_REMOVETARGET_SELF = 0,
+    SO_REMOVETARGET_ONE_FIT_CONDITION = 1,
+    SO_REMOVETARGET_ALL_FIT_CONDITION = 2,
+    SO_REMOVETARGET_ALL_TARGETS = 3,
+
+    SO_REMOVETARGET_MAX
+};
+
+// Possible datalong4 values for SCRIPT_COMMAND_SET_MAP_EVENT_DATA
+enum eSetMapScriptDataOptions
+{
+    SO_MAPEVENTDATA_RAW       = 0,
+    SO_MAPEVENTDATA_INCREMENT = 1,
+    SO_MAPEVENTDATA_DECREMENT = 2,
+
+    SO_MAPEVENTDATA_MAX
+};
+
+// Possible datalong3 values for SCRIPT_COMMAND_SEND_MAP_EVENT
+enum eSendMapEventOptions
+{
+    SO_SENDMAPEVENT_MAIN_TARGETS_ONLY  = 0,
+    SO_SENDMAPEVENT_EXTRA_TARGETS_ONLY = 1,
+    SO_SENDMAPEVENT_ALL_TARGETS        = 2,
+
+    SO_SENDMAPEVENT_MAX
+};
+
+// Possible datalong2 values for SCRIPT_COMMAND_START_SCRIPT_FOR_ALL
+enum eStartScriptForAllOptions
+{
+    SO_STARTFORALL_GAMEOBJECTS  = 0,
+    SO_STARTFORALL_UNITS        = 1,
+    SO_STARTFORALL_CREATURES    = 2,
+    SO_STARTFORALL_PLAYERS      = 3,
+
+    SO_STARTFORALL_MAX
 };
 
 enum eDataFlags
@@ -397,6 +517,8 @@ struct ScriptInfo
             uint32 travelTime;                              // datalong2
             uint32 movementOptions;                         // datalong3
             uint32 flags;                                   // datalong4
+            uint32 unused;                                  // data_flags
+            int32 pointId;                                  // dataint
         } moveTo;
 
         struct                                              // SCRIPT_COMMAND_MODIFY_FLAGS (4)
@@ -422,6 +544,7 @@ struct ScriptInfo
         {
             uint32 questId;                                 // datalong
             uint32 distance;                                // datalong2
+            uint32 group;                                   // datalong3
         } questExplored;
 
         struct                                              // SCRIPT_COMMAND_KILL_CREDIT (8)
@@ -444,7 +567,7 @@ struct ScriptInfo
             uint32 uniqueDistance;                          // datalong4
             uint32 unused;                                  // data_flags
             int32 flags;                                    // dataint
-            int32 facingLogic;                              // dataint2
+            int32 scriptId;                                 // dataint2
             int32 attackTarget;                             // dataint3
             int32 despawnType;                              // dataint4
         } summonCreature;
@@ -506,6 +629,7 @@ struct ScriptInfo
             uint32 movementType;                            // datalong
             uint32 boolParam;                               // datalong2
             uint32 intParam;                                // datalong3
+            uint32 clear;                                   // datalong4
         } movement;
 
         struct                                              // SCRIPT_COMMAND_SET_ACTIVEOBJECT (21)
@@ -529,6 +653,7 @@ struct ScriptInfo
         {
             uint32 creatureOrModelEntry;                    // datalong
             uint32 isDisplayId;                             // datalong2
+            uint32 permanent;                               // datalong3
         } mount;
 
         struct                                              // SCRIPT_COMMAND_SET_RUN (25)
@@ -546,7 +671,7 @@ struct ScriptInfo
 
         struct                                              // SCRIPT_COMMAND_STAND_STATE (28)
         {
-            uint32 stand_state;                             // datalong
+            uint32 standState;                             // datalong
         } standState;
 
         struct                                              // SCRIPT_COMMAND_MODIFY_THREAT (29)
@@ -577,7 +702,7 @@ struct ScriptInfo
 
         struct                                              // SCRIPT_COMMAND_SET_HOME_POSITION (34)
         {
-            uint32 useCurrent;                              // datalong
+            uint32 mode;                                    // datalong
         } setHome;
 
         struct                                              // SCRIPT_COMMAND_TURN_TO (35)
@@ -690,13 +815,146 @@ struct ScriptInfo
 
         struct                                              // SCRIPT_COMMAND_CREATURE_SPELLS (55)
         {
-            uint32 spells_template[4];                      // datalong to datalong4
+            uint32 spellTemplate[4];                        // datalong to datalong4
             uint32 unused;                                  // data_flags
             int32 chance[4];                                // dataint to dataint4
         } creatureSpells;
 
-                                                            // SCRIPT_COMMAND_REMOVE_GUARDIANS (56)
+        struct                                              // SCRIPT_COMMAND_REMOVE_GUARDIANS (56)
+        {
+            uint32 creatureId;                              // datalong
+        } removeGuardian;
 
+        struct                                              // SCRIPT_COMMAND_ADD_SPELL_COOLDOWN (57)
+        {
+            uint32 spellId;                                 // datalong
+            uint32 cooldown;                                // datalong2
+        } addCooldown;
+
+        struct                                              // SCRIPT_COMMAND_REMOVE_SPELL_COOLDOWN (58)
+        {
+            uint32 spellId;                                 // datalong
+        } removeCooldown;
+
+        struct                                              // SCRIPT_COMMAND_SET_REACT_STATE (59)
+        {
+            uint32 state;                                   // datalong
+        } setReactState;
+
+        struct                                              // SCRIPT_COMMAND_START_WAYPOINTS (60)
+        {
+            uint32 wpSource;                                // datalong
+            uint32 startPoint;                              // datalong2
+            uint32 initialDelay;                            // datalong3
+            uint32 canRepeat;                               // datalong4
+            uint32 unused;                                  // data_flags
+            int32  pathId;                                  // dataint
+            int32  overwriteEntry;                          // dataint2
+        } startWaypoints;
+        
+        struct                                              // SCRIPT_COMMAND_START_MAP_EVENT (61)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 timeLimit;                               // datalong2
+            uint32 unused1;                                 // datalong3
+            uint32 unuded2;                                 // datalong4
+            uint32 unused3;                                 // data_flags
+            int32  successCondition;                        // dataint
+            int32  successScript;                           // dataint2
+            int32  failureCondition;                        // dataint3
+            int32  failureScript;                           // dataint4
+        } startMapEvent;
+
+        struct                                              // SCRIPT_COMMAND_END_MAP_EVENT (62)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 success;                                 // datalong2
+        } endMapEvent;
+
+        struct                                              // SCRIPT_COMMAND_ADD_MAP_EVENT_TARGET (63)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 unused1;                                 // datalong2
+            uint32 unused2;                                 // datalong3
+            uint32 unused3;                                 // datalong4
+            uint32 unused4;                                 // data_flags
+            int32  successCondition;                        // dataint
+            int32  successScript;                           // dataint2
+            int32  failureCondition;                        // dataint3
+            int32  failureScript;                           // dataint4
+        } addMapEventTarget;
+
+        struct                                              // SCRIPT_COMMAND_REMOVE_MAP_EVENT_TARGET (64)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 conditionId;                             // datalong2
+            uint32 targets;                                 // datalong3
+        } removeMapEventTarget;
+
+        struct                                              // SCRIPT_COMMAND_SET_MAP_EVENT_DATA (65)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 index;                                   // datalong2
+            uint32 data;                                    // datalong3
+            uint32 type;                                    // datalong4
+        } setMapEventData;
+
+        struct                                              // SCRIPT_COMMAND_SEND_MAP_EVENT (66)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 data;                                    // datalong2
+            uint32 targets;                                 // datalong3
+        } sendMapEvent;
+
+        struct                                              // SCRIPT_COMMAND_SET_DEFAULT_MOVEMENT (67)
+        {
+            uint32 movementType;                            // datalong
+            uint32 alwaysReplace;                           // datalong2
+            uint32 param1;                                  // datalong3
+        } setDefaultMovement;
+
+        struct                                              // SCRIPT_COMMAND_START_SCRIPT_FOR_ALL (68)
+        {
+            uint32 scriptId;                                // datalong
+            uint32 objectType;                              // datalong2
+            uint32 objectEntry;                             // datalong3
+            uint32 searchRadius;                            // datalong4
+        } startScriptForAll;
+
+        struct                                              // SCRIPT_COMMAND_EDIT_MAP_EVENT (69)
+        {
+            uint32 eventId;                                 // datalong
+            uint32 unused1;                                 // datalong2
+            uint32 unused2;                                 // datalong3
+            uint32 unused3;                                 // datalong4
+            uint32 unused4;                                 // data_flags
+            int32  successCondition;                        // dataint
+            int32  successScript;                           // dataint2
+            int32  failureCondition;                        // dataint3
+            int32  failureScript;                           // dataint4
+        } editMapEvent;
+
+        struct                                              // SCRIPT_COMMAND_FAIL_QUEST (70)
+        {
+            uint32 questId;                                 // datalong
+        } failQuest;
+
+        struct                                              // SCRIPT_COMMAND_RESPAWN_CREATURE (71)
+        {
+            uint32 evenAlive;                               // datalong
+        } respawnCreature;
+
+                                                            // SCRIPT_COMMAND_ASSIST_UNIT (72)
+
+                                                            // SCRIPT_COMMAND_COMBAT_STOP (73)
+
+        struct                                              // SCRIPT_COMMAND_ADD_AURA (74)
+        {
+            uint32 spellId;                                 // datalong
+            uint32 flags;                                   // datalong2
+        } addAura;
+
+                                                            // SCRIPT_COMMAND_ADD_THREAT (75)
         struct
         {
             uint32 data[9];
@@ -775,54 +1033,73 @@ enum CastFlags
     CF_TRIGGERED              = 0x02,                     //Triggered (this makes spell cost zero mana and have no cast time)
     CF_FORCE_CAST             = 0x04,                     //Forces cast even if creature is out of mana or out of range
     CF_MAIN_RANGED_SPELL      = 0x08,                     //To be used by ranged mobs only. Creature will not chase target until cast fails.
-    CF_TARGET_CASTS_ON_SELF   = 0x10,                     //Forces the target to cast this spell on itself
+    CF_TARGET_UNREACHABLE     = 0x10,                     //Will only use the ability if creature cannot currently get to target
     CF_AURA_NOT_PRESENT       = 0x20,                     //Only casts the spell if the target does not have an aura from the spell
+    CF_ONLY_IN_MELEE          = 0x40,                     //Only casts if the creature is in melee range of the target
+    CF_NOT_IN_MELEE           = 0x80,                     //Only casts if the creature is not in melee range of the target
 };
 
-#define ALL_CAST_FLAGS (CF_INTERRUPT_PREVIOUS | CF_TRIGGERED | CF_FORCE_CAST | CF_MAIN_RANGED_SPELL | CF_TARGET_CASTS_ON_SELF | CF_AURA_NOT_PRESENT)
+#define ALL_CAST_FLAGS (CF_INTERRUPT_PREVIOUS | CF_TRIGGERED | CF_FORCE_CAST | CF_MAIN_RANGED_SPELL | CF_TARGET_UNREACHABLE | CF_AURA_NOT_PRESENT)
 
 // Values used in target_type column
 enum ScriptTarget
 {
-    TARGET_T_PROVIDED_TARGET                = 0,            //Object that was provided to the command
+    TARGET_T_PROVIDED_TARGET                = 0,            //Object that was provided to the command.
 
-    TARGET_T_HOSTILE                        = 1,            //Our current target (ie: highest aggro)
-    TARGET_T_HOSTILE_SECOND_AGGRO           = 2,            //Second highest aggro (generaly used for cleaves and some special attacks)
-    TARGET_T_HOSTILE_LAST_AGGRO             = 3,            //Dead last on aggro (no idea what this could be used for)
-    TARGET_T_HOSTILE_RANDOM                 = 4,            //Just any random target on our threat list
-    TARGET_T_HOSTILE_RANDOM_NOT_TOP         = 5,            //Any random target except top threat
+    TARGET_T_HOSTILE                        = 1,            //Our current target (ie: highest aggro).
+    TARGET_T_HOSTILE_SECOND_AGGRO           = 2,            //Second highest aggro (generaly used for cleaves and some special attacks).
+    TARGET_T_HOSTILE_LAST_AGGRO             = 3,            //Dead last on aggro (no idea what this could be used for).
+    TARGET_T_HOSTILE_RANDOM                 = 4,            //Just any random target on our threat list.
+    TARGET_T_HOSTILE_RANDOM_NOT_TOP         = 5,            //Any random target except top threat.
 
-    TARGET_T_OWNER_OR_SELF                  = 6,            //Either self or owner if pet or controlled
-    TARGET_T_OWNER                          = 7,            //The owner of the source
+    TARGET_T_OWNER_OR_SELF                  = 6,            //Either self or owner if pet or controlled.
+    TARGET_T_OWNER                          = 7,            //The owner of the source.
     
 
-    TARGET_T_CREATURE_WITH_ENTRY            = 8,            //Searches for nearby creature with the given entry
+    TARGET_T_CREATURE_WITH_ENTRY            = 8,            //Searches for nearby creature with the given entry.
                                                             //Param1 = creature_entry
                                                             //Param2 = search_radius
 
-    TARGET_T_CREATURE_WITH_GUID             = 9,            //The creature with this database guid
+    TARGET_T_CREATURE_WITH_GUID             = 9,            //The creature with this database guid.
                                                             //Param1 = db_guid
 
-    TARGET_T_CREATURE_FROM_INSTANCE_DATA    = 10,           //Find creature by guid stored in instance data
+    TARGET_T_CREATURE_FROM_INSTANCE_DATA    = 10,           //Find creature by guid stored in instance data.
                                                             //Param1 = instance_data_field
 
-    TARGET_T_GAMEOBJECT_WITH_ENTRY          = 11,           //Searches for nearby gameobject with the given entry
+    TARGET_T_GAMEOBJECT_WITH_ENTRY          = 11,           //Searches for nearby gameobject with the given entry.
                                                             //Param1 = gameobject_entry
                                                             //Param2 = search_radius
 
-    TARGET_T_GAMEOBJECT_WITH_GUID           = 12,           //The gameobject with this database guid
+    TARGET_T_GAMEOBJECT_WITH_GUID           = 12,           //The gameobject with this database guid.
                                                             //Param1 = db_guid
 
-    TARGET_T_GAMEOBJECT_FROM_INSTANCE_DATA  = 13,           //Find gameobject by guid stored in instance data
+    TARGET_T_GAMEOBJECT_FROM_INSTANCE_DATA  = 13,           //Find gameobject by guid stored in instance data.
                                                             //Param1 = instance_data_field
 
     TARGET_T_FRIENDLY                       = 14,           //Random friendly unit.
-                                                            //Param1 = spell_id (for range check)
-                                                            //Param2 = (bool) exclude_self
-
+                                                            //Param1 = search_radius
+                                                            //Param2 = (bool) exclude_target
     TARGET_T_FRIENDLY_INJURED               = 15,           //Friendly unit missing the most health.
-                                                            //Param1 = spell_id (for range check)
+                                                            //Param1 = search_radius
                                                             //Param2 = hp_percent
+    TARGET_T_FRIENDLY_INJURED_EXCEPT        = 16,           //Friendly unit missing the most health but not provided target.
+                                                            //Param1 = search_radius
+                                                            //Param2 = hp_percent
+    TARGET_T_FRIENDLY_MISSING_BUFF          = 17,           //Friendly unit without aura.
+                                                            //Param1 = search_radius
+                                                            //Param2 = spell_id
+    TARGET_T_FRIENDLY_MISSING_BUFF_EXCEPT   = 18,           //Friendly unit without aura but not provided target.
+                                                            //Param1 = search_radius
+                                                            //Param2 = spell_id
+    TARGET_T_FRIENDLY_CC                    = 19,           //Friendly unit under crowd control.
+                                                            //Param1 = search_radius
+    TARGET_T_MAP_EVENT_SOURCE               = 20,           //The source WorldObject of a scripted map event.
+                                                            //Param1 = eventId
+    TARGET_T_MAP_EVENT_TARGET               = 21,           //The target WorldObject of a scripted map event.
+                                                            //Param1 = eventId
+    TARGET_T_MAP_EVENT_EXTRA_TARGET         = 22,           //An additional WorldObject target from a scripted map event.
+                                                            //Param1 = eventId
+                                                            //Param2 = creature_entry or gameobject_entry
     TARGET_T_END
 };
 
@@ -831,74 +1108,7 @@ void DoScriptText(int32 textEntry, WorldObject* pSource, Unit* target = nullptr,
 void DoOrSimulateScriptTextForMap(int32 iTextEntry, uint32 uiCreatureEntry, Map* pMap, Creature* pCreatureSource = nullptr, Unit* pTarget = nullptr);
 
 // Returns a target based on the type specified.
-inline WorldObject* GetTargetByType(WorldObject* pSource, WorldObject* pTarget, uint8 TargetType, uint32 Param1 = 0u, uint32 Param2 = 0u)
-{
-    switch (TargetType)
-    {
-        case TARGET_T_PROVIDED_TARGET:
-            return pTarget;
-        case TARGET_T_HOSTILE:
-            if (Unit* pUnitSource = ToUnit(pSource))
-                return pUnitSource->getVictim();
-            break;
-        case TARGET_T_HOSTILE_SECOND_AGGRO:
-            if (Creature* pCreatureSource = ToCreature(pSource))
-                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_TOPAGGRO, 1);
-            break;
-        case TARGET_T_HOSTILE_LAST_AGGRO:
-            if (Creature* pCreatureSource = ToCreature(pSource))
-                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_BOTTOMAGGRO, 0);
-            break;
-        case TARGET_T_HOSTILE_RANDOM:
-            if (Creature* pCreatureSource = ToCreature(pSource))
-                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_RANDOM, 0);
-            break;
-        case TARGET_T_HOSTILE_RANDOM_NOT_TOP:
-            if (Creature* pCreatureSource = ToCreature(pSource))
-                return pCreatureSource->SelectAttackingTarget(ATTACKING_TARGET_RANDOM, 1);
-            break;
-        case TARGET_T_OWNER_OR_SELF:
-            if (Unit* pUnitSource = ToUnit(pSource))
-                return pUnitSource->GetCharmerOrOwnerOrSelf();
-            break;
-        case TARGET_T_OWNER:
-            if (Unit* pUnitSource = ToUnit(pSource))
-                return pUnitSource->GetOwner();
-            break;
-        case TARGET_T_FRIENDLY:
-            if (Unit* pUnitSource = ToUnit(pSource))
-                return pUnitSource->SelectRandomFriendlyTarget(Param2 ? pUnitSource : nullptr, Param1 ? sSpellRangeStore.LookupEntry(sSpellMgr.GetSpellEntry(Param1)->rangeIndex)->maxRange : 30);
-        case TARGET_T_FRIENDLY_INJURED:
-            if (Creature* pCreatureSource = ToCreature(pSource))
-                return pCreatureSource->DoSelectLowestHpFriendly(Param1 ? sSpellRangeStore.LookupEntry(sSpellMgr.GetSpellEntry(Param1)->rangeIndex)->maxRange : 30, Param2 ? Param2 : 50, true);
-    }
-    return nullptr;
-}
-
-//Spell targets used by SelectSpell
-enum SelectTarget
-{
-    SELECT_TARGET_DONTCARE = 0,                             //All target types allowed
-
-    SELECT_TARGET_SELF,                                     //Only Self casting
-
-    SELECT_TARGET_SINGLE_ENEMY,                             //Only Single Enemy
-    SELECT_TARGET_AOE_ENEMY,                                //Only AoE Enemy
-    SELECT_TARGET_ANY_ENEMY,                                //AoE or Single Enemy
-
-    SELECT_TARGET_SINGLE_FRIEND,                            //Only Single Friend
-    SELECT_TARGET_AOE_FRIEND,                               //Only AoE Friend
-    SELECT_TARGET_ANY_FRIEND,                               //AoE or Single Friend
-};
-
-//Spell Effects used by SelectSpell
-enum SelectEffect
-{
-    SELECT_EFFECT_DONTCARE = 0,                             //All spell effects allowed
-    SELECT_EFFECT_DAMAGE,                                   //Spell does damage
-    SELECT_EFFECT_HEALING,                                  //Spell does healing
-    SELECT_EFFECT_AURA,                                     //Spell applies an aura
-};
+WorldObject* GetTargetByType(WorldObject* pSource, WorldObject* pTarget, uint8 TargetType, uint32 Param1 = 0u, uint32 Param2 = 0u);
 
 //TODO: find better namings and definitions.
 //N=Neutral, A=Alliance, H=Horde.
@@ -948,12 +1158,6 @@ struct CreatureEscortData
     uint32 uiQuestEntry;
     uint32 uiEscortFaction;
     uint32 uiLastWaypointEntry;
-};
-
-struct TSpellSummary
-{
-    uint8 Targets;                                          // set of enum SelectTarget
-    uint8 Effects;                                          // set of enum SelectEffect
 };
 
 struct Script
@@ -1027,10 +1231,6 @@ class ScriptMgr
         void LoadScriptNames();
         void LoadAreaTriggerScripts();
         void LoadEventIdScripts();
-        
-        void FillSpellSummary();
-
-        TSpellSummary* GetSpellSummary() const { return m_spellSummary; }
 
         uint32 GetAreaTriggerScriptId(uint32 triggerId) const;
         uint32 GetEventIdScriptId(uint32 eventId) const;
@@ -1128,8 +1328,6 @@ class ScriptMgr
         EventIdScriptMap        m_EventIdScripts;
 
         ScriptNameMap           m_scriptNames;
-
-        TSpellSummary* m_spellSummary;
         
         TextDataMap     m_mTextDataMap;                     //additional data for text strings
         PointMoveMap    m_mPointMoveMap;                    //coordinates for waypoints

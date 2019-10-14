@@ -57,22 +57,26 @@
 
 INSTANTIATE_SINGLETON_1(ObjectMgr);
 
-bool normalizePlayerName(std::string& name)
+#include "utf8cpp/utf8.h"
+
+bool normalizePlayerName(std::string& name, size_t max_len)
 {
     if (name.empty())
         return false;
 
-    wchar_t wstr_buf[MAX_INTERNAL_PLAYER_NAME + 1];
-    size_t wstr_len = MAX_INTERNAL_PLAYER_NAME;
+    std::wstring wstr_buf;
+    if (!Utf8toWStr(name, wstr_buf))
+        return false;
 
-    if (!Utf8toWStr(name, &wstr_buf[0], wstr_len))
+    size_t len = wstr_buf.size();
+    if (len > max_len)
         return false;
 
     wstr_buf[0] = wcharToUpper(wstr_buf[0]);
-    for (size_t i = 1; i < wstr_len; ++i)
+    for (size_t i = 1; i < len; ++i)
         wstr_buf[i] = wcharToLower(wstr_buf[i]);
 
-    if (!WStrToUtf8(wstr_buf, wstr_len, name))
+    if (!WStrToUtf8(wstr_buf, name))
         return false;
 
     return true;
@@ -251,6 +255,20 @@ void ObjectMgr::LoadAllIdentifiers()
             fields = result->Fetch();
             uint32 id = fields[0].GetUInt32();
             m_GameObjectGuidSet.insert(id);
+        } while (result->NextRow());
+        delete result;
+    }
+
+    m_SpellIdSet.clear();
+    result = WorldDatabase.Query("SELECT DISTINCT ID FROM spell_template");
+
+    if (result)
+    {
+        do
+        {
+            fields = result->Fetch();
+            uint32 id = fields[0].GetUInt32();
+            m_SpellIdSet.insert(id);
         } while (result->NextRow());
         delete result;
     }
@@ -1243,9 +1261,9 @@ void ObjectMgr::CheckCreatureTemplates()
 
         if (cInfo->equipmentId > 0)                         // 0 no equipment
         {
-            if (!GetEquipmentInfo(cInfo->equipmentId) && !GetEquipmentInfoRaw(cInfo->equipmentId))
+            if (!GetEquipmentInfo(cInfo->equipmentId))
             {
-                sLog.outErrorDb("Table `creature_template` have creature (Entry: %u) with equipment_id %u not found in table `creature_equip_template` or `creature_equip_template_raw`, set to no equipment.", cInfo->Entry, cInfo->equipmentId);
+                sLog.outErrorDb("Table `creature_template` have creature (Entry: %u) with equipment_id %u not found in table `creature_equip_template`, set to no equipment.", cInfo->Entry, cInfo->equipmentId);
                 sLog.out(LOG_DBERRFIX, "UPDATE creature_template SET `equipment_id`=0 WHERE entry=%u;", cInfo->Entry);
                 const_cast<CreatureInfo*>(cInfo)->equipmentId = 0;
             }
@@ -1388,11 +1406,6 @@ EquipmentInfo const* ObjectMgr::GetEquipmentInfo(uint32 entry)
     return sEquipmentStorage.LookupEntry<EquipmentInfo>(entry);
 }
 
-EquipmentInfoRaw const* ObjectMgr::GetEquipmentInfoRaw(uint32 entry)
-{
-    return sEquipmentStorageRaw.LookupEntry<EquipmentInfoRaw>(entry);
-}
-
 void ObjectMgr::LoadEquipmentTemplates()
 {
     sEquipmentStorage.LoadProgressive(sWorld.GetWowPatch(), true);
@@ -1436,15 +1449,6 @@ void ObjectMgr::LoadEquipmentTemplates()
 
     sLog.outString(">> Loaded %u equipment template", sEquipmentStorage.GetRecordCount());
     sLog.outString();
-
-    sEquipmentStorageRaw.LoadProgressive(sWorld.GetWowPatch(), false);
-    for (uint32 i = 1; i < sEquipmentStorageRaw.GetMaxEntry(); ++i)
-        if (sEquipmentStorageRaw.LookupEntry<EquipmentInfoRaw>(i))
-            if (sEquipmentStorage.LookupEntry<EquipmentInfo>(i))
-                sLog.outErrorDb("Table 'creature_equip_template_raw` have redundant data for ID %u ('creature_equip_template` already have data)", i);
-
-    sLog.outString(">> Loaded %u equipment template (deprecated format)", sEquipmentStorageRaw.GetRecordCount());
-    sLog.outString();
 }
 
 CreatureModelInfo const* ObjectMgr::GetCreatureModelInfo(uint32 modelid)
@@ -1485,7 +1489,7 @@ CreatureModelInfo const* ObjectMgr::GetCreatureModelRandomGender(uint32 display_
 
 void ObjectMgr::LoadCreatureModelInfo()
 {
-    sCreatureModelStorage.Load();
+    sCreatureModelStorage.LoadProgressive(SUPPORTED_CLIENT_BUILD);
 
     // post processing
     for (uint32 i = 1; i < sCreatureModelStorage.GetMaxEntry(); ++i)
@@ -1618,22 +1622,22 @@ void ObjectMgr::LoadCreatureSpells()
     // Now we load creature_spells.
     mCreatureSpellsMap.clear(); // for reload case
 
-                                 //       0       1           2               3            4               5                  6                 7                  8             9
-    result = WorldDatabase.Query("SELECT entry, spellId_1, probability_1, castTarget_1, castFlags_1, delayInitialMin_1, delayInitialMax_1, delayRepeatMin_1, delayRepeatMax_1, scriptId_1, "
-                                 //              10           11             12            13              14                15                 16                17             18
-                                               "spellId_2, probability_2, castTarget_2, castFlags_2, delayInitialMin_2, delayInitialMax_2, delayRepeatMin_2, delayRepeatMax_2, scriptId_2, "
-                                 //              19           20             21            22              23                24                 25                26             27
-                                               "spellId_3, probability_3, castTarget_3, castFlags_3, delayInitialMin_3, delayInitialMax_3, delayRepeatMin_3, delayRepeatMax_3, scriptId_3, "
-                                 //              28           29             30            31              32                33                 34                35             36
-                                               "spellId_4, probability_4, castTarget_4, castFlags_4, delayInitialMin_4, delayInitialMax_4, delayRepeatMin_4, delayRepeatMax_4, scriptId_4, "
-                                 //              37           38             39            40              41                42                 43                44             45
-                                               "spellId_5, probability_5, castTarget_5, castFlags_5, delayInitialMin_5, delayInitialMax_5, delayRepeatMin_5, delayRepeatMax_5, scriptId_5, "
-                                 //              46           47             48            49              50                51                 52                53             54
-                                               "spellId_6, probability_6, castTarget_6, castFlags_6, delayInitialMin_6, delayInitialMax_6, delayRepeatMin_6, delayRepeatMax_6, scriptId_6, "
-                                 //              55           56             57            58              59                60                 61                62             63
-                                               "spellId_7, probability_7, castTarget_7, castFlags_7, delayInitialMin_7, delayInitialMax_7, delayRepeatMin_7, delayRepeatMax_7, scriptId_7, "
-                                 //              64           65             66            67              68                69                 70                71             72
-                                               "spellId_8, probability_8, castTarget_8, castFlags_8, delayInitialMin_8, delayInitialMax_8, delayRepeatMin_8, delayRepeatMax_8, scriptId_8 FROM creature_spells");
+                                 //       0       1           2               3              4               5              6               7                  8                  9                10             11
+    result = WorldDatabase.Query("SELECT entry, spellId_1, probability_1, castTarget_1, targetParam1_1, targetParam2_1, castFlags_1, delayInitialMin_1, delayInitialMax_1, delayRepeatMin_1, delayRepeatMax_1, scriptId_1, "
+                                 //               12          13              14             15              16             17              18                 19                 20               21             22
+                                               "spellId_2, probability_2, castTarget_2, targetParam1_2, targetParam2_2, castFlags_2, delayInitialMin_2, delayInitialMax_2, delayRepeatMin_2, delayRepeatMax_2, scriptId_2, "
+                                 //               23          24              25             26              27             28              29                 30                 31               32             33
+                                               "spellId_3, probability_3, castTarget_3, targetParam1_3, targetParam2_3, castFlags_3, delayInitialMin_3, delayInitialMax_3, delayRepeatMin_3, delayRepeatMax_3, scriptId_3, "
+                                 //               34          35              36             37              38             39              40                 41                 42               43             44
+                                               "spellId_4, probability_4, castTarget_4, targetParam1_4, targetParam2_4, castFlags_4, delayInitialMin_4, delayInitialMax_4, delayRepeatMin_4, delayRepeatMax_4, scriptId_4, "
+                                 //               45          46              47             48              49             50              51                 52                 53               54             55
+                                               "spellId_5, probability_5, castTarget_5, targetParam1_5, targetParam2_5, castFlags_5, delayInitialMin_5, delayInitialMax_5, delayRepeatMin_5, delayRepeatMax_5, scriptId_5, "
+                                 //               56          57              58             59              60             61              62                 63                 64               65             66
+                                               "spellId_6, probability_6, castTarget_6, targetParam1_6, targetParam2_6, castFlags_6, delayInitialMin_6, delayInitialMax_6, delayRepeatMin_6, delayRepeatMax_6, scriptId_6, "
+                                 //               67          68              69             70              71             72              73                 74                 75               76             77
+                                               "spellId_7, probability_7, castTarget_7, targetParam1_7, targetParam2_7, castFlags_7, delayInitialMin_7, delayInitialMax_7, delayRepeatMin_7, delayRepeatMax_7, scriptId_7, "
+                                 //               78          79              80             81              82             83              84                 85                 86               87             88
+                                               "spellId_8, probability_8, castTarget_8, targetParam1_8, targetParam2_8, castFlags_8, delayInitialMin_8, delayInitialMax_8, delayRepeatMin_8, delayRepeatMax_8, scriptId_8 FROM creature_spells");
     if (!result)
     {
         BarGoLink bar(1);
@@ -1656,9 +1660,9 @@ void ObjectMgr::LoadCreatureSpells()
 
         CreatureSpellsTemplate spellsTemplate;
 
-        for (uint8 i = 0; i < 8; i++)
+        for (uint8 i = 0; i < CREATURE_SPELLS_MAX_SPELLS; i++)
         {
-            uint16 spellId = fields[1 + i * 9].GetUInt16();
+            uint16 spellId = fields[1 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt16();
             if (spellId)
             {
                 if (!sSpellMgr.GetSpellEntry(spellId))
@@ -1667,7 +1671,7 @@ void ObjectMgr::LoadCreatureSpells()
                     continue;
                 }
 
-                uint8 probability      = fields[2 + i * 9].GetUInt8();
+                uint8 probability      = fields[2 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt8();
 
                 if ((probability == 0) || (probability > 100))
                 {
@@ -1675,13 +1679,16 @@ void ObjectMgr::LoadCreatureSpells()
                     probability = 100;
                 }
 
-                uint8 castTarget       = fields[3 + i * 9].GetUInt8();
-                uint8 castFlags        = fields[4 + i * 9].GetUInt8();
+                uint8 castTarget       = fields[3 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt8();
+                uint32 targetParam1    = fields[4 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt32();
+                uint32 targetParam2    = fields[5 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt32();
+
+                uint8 castFlags        = fields[6 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt8();
 
                 // in the database we store timers as seconds
                 // based on screenshot of blizzard creature spells editor
-                uint32 delayInitialMin = fields[5 + i * 9].GetUInt16() * IN_MILLISECONDS;
-                uint32 delayInitialMax = fields[6 + i * 9].GetUInt16() * IN_MILLISECONDS;
+                uint32 delayInitialMin = fields[7 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt16() * IN_MILLISECONDS;
+                uint32 delayInitialMax = fields[8 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt16() * IN_MILLISECONDS;
 
                 if (delayInitialMin > delayInitialMax)
                 {
@@ -1689,8 +1696,8 @@ void ObjectMgr::LoadCreatureSpells()
                     continue;
                 }
 
-                uint32 delayRepeatMin  = fields[7 + i * 9].GetUInt16() * IN_MILLISECONDS;
-                uint32 delayRepeatMax  = fields[8 + i * 9].GetUInt16() * IN_MILLISECONDS;
+                uint32 delayRepeatMin  = fields[9 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt16() * IN_MILLISECONDS;
+                uint32 delayRepeatMax  = fields[10 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt16() * IN_MILLISECONDS;
 
                 if (delayRepeatMin > delayRepeatMax)
                 {
@@ -1698,7 +1705,7 @@ void ObjectMgr::LoadCreatureSpells()
                     continue;
                 }
 
-                uint32 scriptId = fields[9 + i * 9].GetUInt32();
+                uint32 scriptId = fields[11 + i * CREATURE_SPELLS_MAX_COLUMNS].GetUInt32();
 
                 if (scriptId)
                 {
@@ -1711,7 +1718,7 @@ void ObjectMgr::LoadCreatureSpells()
                         spellScriptSet.erase(scriptId);
                 }
 
-                spellsTemplate.emplace_back(spellId, probability, castTarget, castFlags, delayInitialMin, delayInitialMax, delayRepeatMin, delayRepeatMax, scriptId);
+                spellsTemplate.emplace_back(spellId, probability, castTarget, targetParam1, targetParam2, castFlags, delayInitialMin, delayInitialMax, delayRepeatMin, delayRepeatMax, scriptId);
             }
         }
 
@@ -1846,9 +1853,9 @@ void ObjectMgr::LoadCreatures(bool reload)
 
         if (data.equipmentId > 0)                           // -1 no equipment, 0 use default
         {
-            if (!GetEquipmentInfo(data.equipmentId) && !GetEquipmentInfoRaw(data.equipmentId))
+            if (!GetEquipmentInfo(data.equipmentId))
             {
-                sLog.outErrorDb("Table `creature` have creature (Entry: %u) with equipment_id %u not found in table `creature_equip_template` or `creature_equip_template_raw`, set to no equipment.", data.id, data.equipmentId);
+                sLog.outErrorDb("Table `creature` have creature (Entry: %u) with equipment_id %u not found in table `creature_equip_template`, set to no equipment.", data.id, data.equipmentId);
                 data.equipmentId = -1;
             }
         }
@@ -2729,7 +2736,8 @@ void ObjectMgr::LoadPetLevelInfo()
             uint32 creature_id = fields[0].GetUInt32();
             if (!sCreatureStorage.LookupEntry<CreatureInfo>(creature_id))
             {
-                sLog.outErrorDb("Wrong creature id %u in `pet_levelstats` table, ignoring.", creature_id);
+                if (!IsExistingCreatureId(creature_id))
+                    sLog.outErrorDb("Wrong creature id %u in `pet_levelstats` table, ignoring.", creature_id);
                 continue;
             }
 
@@ -5327,7 +5335,7 @@ void ObjectMgr::LoadGraveyardZones()
 {
     mGraveYardMap.clear();                                  // need for reload case
 
-    QueryResult *result = WorldDatabase.Query("SELECT id,ghost_zone,faction FROM game_graveyard_zone");
+    QueryResult *result = WorldDatabase.PQuery("SELECT id, ghost_zone, faction FROM game_graveyard_zone WHERE build_min <= %u", SUPPORTED_CLIENT_BUILD);
 
     uint32 count = 0;
 
@@ -6419,7 +6427,7 @@ void ObjectMgr::LoadFactions()
     sLog.outString("Loading factions ...");
 
     // Getting the maximum ID.
-    QueryResult* result = WorldDatabase.Query("SELECT MAX(ID) FROM faction");
+    QueryResult* result = WorldDatabase.PQuery("SELECT MAX(ID) FROM faction WHERE build=%u", SUPPORTED_CLIENT_BUILD);
 
     if (!result)
     {
@@ -6431,7 +6439,7 @@ void ObjectMgr::LoadFactions()
     delete result;
 
     // Actually loading the factions.
-    result = WorldDatabase.Query("SELECT * FROM faction");
+    result = WorldDatabase.PQuery("SELECT * FROM faction WHERE build=%u", SUPPORTED_CLIENT_BUILD);
 
     if (!result)
     {
@@ -6492,7 +6500,7 @@ void ObjectMgr::LoadFactions()
     delete result;
 
     // Getting the maximum ID.
-    result = WorldDatabase.Query("SELECT MAX(ID) FROM faction_template");
+    result = WorldDatabase.PQuery("SELECT MAX(ID) FROM faction_template WHERE build=%u", SUPPORTED_CLIENT_BUILD);
 
     if (!result)
     {
@@ -6504,7 +6512,7 @@ void ObjectMgr::LoadFactions()
     delete result;
 
     // Actually loading the faction templates.
-    result = WorldDatabase.Query("SELECT * FROM faction_template");
+    result = WorldDatabase.PQuery("SELECT * FROM faction_template WHERE build=%u", SUPPORTED_CLIENT_BUILD);
 
     if (!result)
     {
@@ -6867,70 +6875,6 @@ void ObjectMgr::LoadPointsOfInterest()
     sLog.outString(">> Loaded %u Points of Interest definitions", count);
 }
 
-void ObjectMgr::LoadWeatherZoneChances()
-{
-    uint32 count = 0;
-
-    //                                                0     1                   2                   3                    4                   5                   6                    7                 8                 9                  10                  11                  12
-    QueryResult *result = WorldDatabase.Query("SELECT zone, spring_rain_chance, spring_snow_chance, spring_storm_chance, summer_rain_chance, summer_snow_chance, summer_storm_chance, fall_rain_chance, fall_snow_chance, fall_storm_chance, winter_rain_chance, winter_snow_chance, winter_storm_chance FROM game_weather");
-
-    if (!result)
-    {
-        BarGoLink bar(1);
-
-        bar.step();
-
-        sLog.outString();
-        sLog.outErrorDb(">> Loaded 0 weather definitions. DB table `game_weather` is empty.");
-        return;
-    }
-
-    BarGoLink bar(result->GetRowCount());
-
-    do
-    {
-        Field *fields = result->Fetch();
-        bar.step();
-
-        uint32 zone_id = fields[0].GetUInt32();
-
-        WeatherZoneChances& wzc = mWeatherZoneMap[zone_id];
-
-        for (int season = 0; season < WEATHER_SEASONS; ++season)
-        {
-            wzc.data[season].rainChance  = fields[season * (MAX_WEATHER_TYPE - 1) + 1].GetUInt32();
-            wzc.data[season].snowChance  = fields[season * (MAX_WEATHER_TYPE - 1) + 2].GetUInt32();
-            wzc.data[season].stormChance = fields[season * (MAX_WEATHER_TYPE - 1) + 3].GetUInt32();
-
-            if (wzc.data[season].rainChance > 100)
-            {
-                wzc.data[season].rainChance = 25;
-                sLog.outErrorDb("Weather for zone %u season %u has wrong rain chance > 100%%", zone_id, season);
-            }
-
-            if (wzc.data[season].snowChance > 100)
-            {
-                wzc.data[season].snowChance = 25;
-                sLog.outErrorDb("Weather for zone %u season %u has wrong snow chance > 100%%", zone_id, season);
-            }
-
-            if (wzc.data[season].stormChance > 100)
-            {
-                wzc.data[season].stormChance = 25;
-                sLog.outErrorDb("Weather for zone %u season %u has wrong storm chance > 100%%", zone_id, season);
-            }
-        }
-
-        ++count;
-    }
-    while (result->NextRow());
-
-    delete result;
-
-    sLog.outString();
-    sLog.outString(">> Loaded %u weather definitions", count);
-}
-
 void ObjectMgr::DeleteCreatureData(uint32 guid)
 {
     // remove mapid*cellid -> guid_set map
@@ -6973,7 +6917,7 @@ void ObjectMgr::LoadQuestRelationsHelper(QuestRelationsMap& map, char const* tab
 
     uint32 count = 0;
 
-    QueryResult *result = WorldDatabase.PQuery("SELECT id,quest FROM %s t1 WHERE patch=(SELECT max(patch) FROM %s t2 WHERE t1.id=t2.id && t1.quest=t2.quest && patch <= %u)", table, table, sWorld.GetWowPatch());
+    QueryResult *result = WorldDatabase.PQuery("SELECT id,quest FROM %s WHERE %u BETWEEN patch_min AND patch_max", table, sWorld.GetWowPatch());
 
     if (!result)
     {
@@ -7068,6 +7012,85 @@ void ObjectMgr::LoadCreatureInvolvedRelations()
         else if (!(cInfo->npcflag & UNIT_NPC_FLAG_QUESTGIVER))
             sLog.outDetail("Table `creature_involvedrelation` has creature entry (%u) for quest %u, but npcflag does not include UNIT_NPC_FLAG_QUESTGIVER", itr->first, itr->second);
     }
+}
+
+void ObjectMgr::LoadTaxiPathTransitions()
+{
+    m_TaxiPathTransitions.clear();                                            // need for reload case
+
+    uint32 count = 0;
+
+    QueryResult *result = WorldDatabase.PQuery("SELECT inPath, outPath, inNode, outNode FROM taxi_path_transitions WHERE build_min <= %u", SUPPORTED_CLIENT_BUILD);
+
+    if (!result)
+    {
+        BarGoLink bar(1);
+        bar.step();
+
+        sLog.outString();
+        sLog.outErrorDb(">> Loaded 0 taxi path transition from `taxi_path_transitions.");
+        return;
+    }
+
+    BarGoLink bar(result->GetRowCount());
+
+    do
+    {
+        Field *fields = result->Fetch();
+        bar.step();
+
+        uint32 inPath = fields[0].GetUInt32();
+        uint32 outPath = fields[1].GetUInt32();
+        uint32 inNode = fields[2].GetUInt32();
+        uint32 outNode = fields[3].GetUInt32();
+
+        if (!sTaxiPathStore.LookupEntry(inPath))
+        {
+            sLog.outErrorDb("Table `taxi_path_transitions`: inPath %u does not exist", inPath);
+            continue;
+        }
+        if (!sTaxiPathStore.LookupEntry(outPath))
+        {
+            sLog.outErrorDb("Table `taxi_path_transitions`: outPath %u does not exist", outPath);
+            continue;
+        }
+        if (inNode >= sTaxiPathNodesByPath[inPath].size())
+        {
+            sLog.outErrorDb("Table `taxi_path_transitions`: inNode %u does not exist in inPath %u", inNode, inPath);
+            continue;
+        }
+        if (outNode >= sTaxiPathNodesByPath[outPath].size())
+        {
+            sLog.outErrorDb("Table `taxi_path_transitions`: outNode %u does not exist in outPath %u", outNode, outPath);
+            continue;
+        }
+
+        auto bounds = m_TaxiPathTransitions.equal_range(inPath);
+        for (auto it = bounds.first; it != bounds.second; ++it)
+        {
+            if (it->second.outPath == outPath)
+            {
+                sLog.outErrorDb("Table `taxi_path_transitions`: duplicate of (inPath %u, outPath %u)", inPath, outPath);
+                continue;
+            }
+        }
+
+        TaxiPathTransition transition;
+
+        transition.inPath = inPath;
+        transition.outPath = outPath;
+        transition.inNode = inNode;
+        transition.outNode = outNode;
+
+        m_TaxiPathTransitions.insert(TaxiPathTransitionsMap::value_type(inPath, transition));
+
+        ++count;
+    } while (result->NextRow());
+
+    delete result;
+
+    sLog.outString();
+    sLog.outString(">> Loaded %u taxi path transitions", count);
 }
 
 void ObjectMgr::LoadReservedPlayersNames()
@@ -7454,7 +7477,17 @@ void ObjectMgr::LoadBroadcastTexts()
         bct.EmoteDelay0 = fields[9].GetUInt32();
         bct.EmoteDelay1 = fields[10].GetUInt32();
         bct.EmoteDelay2 = fields[11].GetUInt32();
-        
+
+        // Prior to 1.12, the %s parameter was not used. Emotes have the source object's name automatically appended to the beginning.
+#if SUPPORTED_CLIENT_BUILD < CLIENT_BUILD_1_12_1
+        if ((bct.Type == CHAT_TYPE_TEXT_EMOTE))
+        {
+            if ((bct.MaleText[LOCALE_enUS].size() > 3) && (bct.MaleText[LOCALE_enUS].at(0) == '%') && (bct.MaleText[LOCALE_enUS].at(1) == 's'))
+                bct.MaleText[LOCALE_enUS] = bct.MaleText[LOCALE_enUS].substr(3, bct.MaleText[LOCALE_enUS].size() - 3);
+            if ((bct.FemaleText[LOCALE_enUS].size() > 3) && (bct.FemaleText[LOCALE_enUS].at(0) == '%') && (bct.FemaleText[LOCALE_enUS].at(1) == 's'))
+                bct.FemaleText[LOCALE_enUS] = bct.FemaleText[LOCALE_enUS].substr(3, bct.FemaleText[LOCALE_enUS].size() - 3);
+        }
+#endif  
 
         if (bct.SoundId)
         {
@@ -7546,6 +7579,13 @@ void ObjectMgr::LoadBroadcastTextLocales()
             std::string str = fields[i].GetCppString();
             if (!str.empty())
             {
+#if SUPPORTED_CLIENT_BUILD < CLIENT_BUILD_1_12_1
+                if ((bct->second.Type == CHAT_TYPE_TEXT_EMOTE))
+                {
+                    if ((str.size() > 3) && (str.at(0) == '%') && (str.at(1) == 's'))
+                        str = str.substr(3, str.size() - 3);
+                }
+#endif  
                 int idx = GetOrNewIndexForLocale(LocaleConstant(i));
                 if (idx >= 0)
                 {
@@ -7564,6 +7604,13 @@ void ObjectMgr::LoadBroadcastTextLocales()
             std::string str = fields[8 + i].GetCppString();
             if (!str.empty())
             {
+#if SUPPORTED_CLIENT_BUILD < CLIENT_BUILD_1_12_1
+                if ((bct->second.Type == CHAT_TYPE_TEXT_EMOTE))
+                {
+                    if ((str.size() > 3) && (str.at(0) == '%') && (str.at(1) == 's'))
+                        str = str.substr(3, str.size() - 3);
+                }
+#endif  
                 int idx = GetOrNewIndexForLocale(LocaleConstant(i));
                 if (idx >= 0)
                 {
@@ -7870,6 +7917,67 @@ bool ObjectMgr::LoadQuestGreetings()
     return true;
 }
 
+bool ObjectMgr::LoadTrainerGreetings()
+{
+    mTrainerGreetingLocaleMap.clear();
+
+    QueryResult *result = WorldDatabase.Query("SELECT entry,content_default,content_loc1,content_loc2,content_loc3,content_loc4,content_loc5,content_loc6,content_loc7,content_loc8 FROM npc_trainer_greeting");
+
+    if (!result)
+    {
+        sLog.outString(">> Loaded 0 npc trainer greetings. DB table `npc_trainer_greeting` is empty.");
+        return false;
+    }
+
+    uint32 count = 0;
+
+    do
+    {
+        Field *fields = result->Fetch();
+        uint32 entry = fields[0].GetUInt32();
+
+        if (!ObjectMgr::GetCreatureTemplate(entry))
+        {
+            if (!IsExistingCreatureId(entry))
+                sLog.outErrorDb("Table `npc_trainer_greeting` have entry for nonexistent creature template (Entry: %u), ignore", entry);
+            continue;
+        }
+
+        TrainerGreetingLocale& data = mTrainerGreetingLocaleMap[entry];
+
+        data.Content.resize(1);
+        ++count;
+
+        // 0 -> default, idx in to idx+1
+        data.Content[0] = fields[1].GetCppString();
+
+        for (int i = 1; i < MAX_LOCALE; ++i)
+        {
+            std::string str = fields[i + 1].GetCppString();
+            if (!str.empty())
+            {
+                int idx = GetOrNewIndexForLocale(LocaleConstant(i));
+                if (idx >= 0)
+                {
+                    // 0 -> default, idx in to idx+1
+                    if ((int32)data.Content.size() <= idx + 1)
+                        data.Content.resize(idx + 2);
+
+                    data.Content[idx + 1] = str;
+                }
+            }
+        }
+
+    } while (result->NextRow());
+
+    delete result;
+
+    sLog.outString();
+    sLog.outString(">> Loaded %u trainer greetings.", count);
+
+    return true;
+}
+
 void ObjectMgr::LoadFishingBaseSkillLevel()
 {
     mFishingBaseForArea.clear();                            // for reload case
@@ -8118,7 +8226,8 @@ void ObjectMgr::LoadTrainers(char const* tableName, bool isTemplates)
         SpellEntry const *spellinfo = sSpellMgr.GetSpellEntry(spell);
         if (!spellinfo)
         {
-            sLog.outErrorDb("Table `%s` (Entry: %u ) has non existing spell %u, ignore", tableName, entry, spell);
+            if (!IsExistingSpellId(spell))
+                sLog.outErrorDb("Table `%s` (Entry: %u ) has non existing spell %u, ignore", tableName, entry, spell);
             continue;
         }
 
@@ -8225,18 +8334,25 @@ void ObjectMgr::LoadTrainerTemplates()
     for (CacheTrainerSpellMap::const_iterator tItr = m_mCacheTrainerTemplateSpellMap.begin(); tItr != m_mCacheTrainerTemplateSpellMap.end(); ++tItr)
         trainer_ids.insert(tItr->first);
 
-    for (uint32 i = 1; i < sCreatureStorage.GetMaxEntry(); ++i)
+    // We need to use a query to get all used trainer ids because of progression.
+    // It might be used by a creature that is not loaded in this patch.
+    QueryResult* result = WorldDatabase.Query("SELECT entry, patch, trainer_id FROM creature_template WHERE trainer_id != 0");
+
+    if (result)
     {
-        if (CreatureInfo const* cInfo = sCreatureStorage.LookupEntry<CreatureInfo>(i))
+        Field* fields;
+        do
         {
-            if (cInfo->trainerId)
-            {
-                if (m_mCacheTrainerTemplateSpellMap.find(cInfo->trainerId) != m_mCacheTrainerTemplateSpellMap.end())
-                    trainer_ids.erase(cInfo->trainerId);
-                else
-                    sLog.outErrorDb("Creature (Entry: %u) has trainer_id = %u for nonexistent trainer template", cInfo->Entry, cInfo->trainerId);
-            }
-        }
+            fields = result->Fetch();
+            uint32 creature_id = fields[0].GetUInt32();
+            uint32 patch = fields[1].GetUInt32();
+            uint32 trainer_id = fields[2].GetUInt32();
+            if (m_mCacheTrainerTemplateSpellMap.find(trainer_id) != m_mCacheTrainerTemplateSpellMap.end())
+                trainer_ids.erase(trainer_id);
+            else if (patch <= sWorld.GetWowPatch())
+                sLog.outErrorDb("Creature (Entry: %u) has trainer_id = %u for nonexistent trainer template", creature_id, trainer_id);
+        } while (result->NextRow());
+        delete result;
     }
 
     for (std::set<uint32>::const_iterator tItr = trainer_ids.begin(); tItr != trainer_ids.end(); ++tItr)
@@ -8254,7 +8370,7 @@ void ObjectMgr::LoadVendors(char const* tableName, bool isTemplates)
 
     std::set<uint32> skip_vendors;
 
-    QueryResult *result = WorldDatabase.PQuery("SELECT entry, item, maxcount, incrtime FROM %s WHERE (item NOT IN (SELECT entry FROM forbidden_items WHERE (AfterOrBefore = 0 && patch <= %u) || (AfterOrBefore = 1 && patch >= %u)))", tableName, sWorld.GetWowPatch(), sWorld.GetWowPatch());
+    QueryResult *result = WorldDatabase.PQuery("SELECT entry, item, maxcount, incrtime, itemflags FROM %s WHERE (item NOT IN (SELECT entry FROM forbidden_items WHERE (AfterOrBefore = 0 && patch <= %u) || (AfterOrBefore = 1 && patch >= %u)))", tableName, sWorld.GetWowPatch(), sWorld.GetWowPatch());
     if (!result)
     {
         BarGoLink bar(1);
@@ -8278,13 +8394,14 @@ void ObjectMgr::LoadVendors(char const* tableName, bool isTemplates)
         uint32 item_id      = fields[1].GetUInt32();
         uint32 maxcount     = fields[2].GetUInt32();
         uint32 incrtime     = fields[3].GetUInt32();
+        uint32 itemflags    = fields[4].GetUInt32();
 
         if (!IsVendorItemValid(isTemplates, tableName, entry, item_id, maxcount, incrtime, NULL, &skip_vendors))
             continue;
 
         VendorItemData& vList = vendorList[entry];
 
-        vList.AddItem(item_id, maxcount, incrtime);
+        vList.AddItem(item_id, maxcount, incrtime, itemflags);
         ++count;
 
     }
@@ -8306,34 +8423,23 @@ void ObjectMgr::LoadVendorTemplates()
     for (CacheVendorItemMap::const_iterator vItr = m_mCacheVendorTemplateItemMap.begin(); vItr != m_mCacheVendorTemplateItemMap.end(); ++vItr)
         vendor_ids.insert(vItr->first);
 
-    for (uint32 i = 1; i < sCreatureStorage.GetMaxEntry(); ++i)
-    {
-        if (CreatureInfo const* cInfo = sCreatureStorage.LookupEntry<CreatureInfo>(i))
-        {
-            if (cInfo->vendorId)
-            {
-                if (m_mCacheVendorTemplateItemMap.find(cInfo->vendorId) !=  m_mCacheVendorTemplateItemMap.end())
-                    vendor_ids.erase(cInfo->vendorId);
-                else
-                    sLog.outErrorDb("Creature (Entry: %u) has vendor_id = %u for nonexistent vendor template", cInfo->Entry, cInfo->vendorId);
-            }
-        }
-    }
-
     // We need to use a query to get all used vendor ids because of progression.
     // It might be used by a creature that is not loaded in this patch.
-    QueryResult* result = WorldDatabase.Query("SELECT vendor_id FROM creature_template WHERE vendor_id > 0");
-
-    Field* fields;
+    QueryResult* result = WorldDatabase.Query("SELECT entry, patch, vendor_id FROM creature_template WHERE vendor_id != 0");
 
     if (result)
     {
+        Field* fields;
         do
         {
             fields = result->Fetch();
-            uint32 vendorId = fields[0].GetUInt32();
-            if (vendor_ids.find(vendorId) != vendor_ids.end())
-                vendor_ids.erase(vendorId);
+            uint32 creature_id = fields[0].GetUInt32();
+            uint32 patch = fields[1].GetUInt32();
+            uint32 vendor_id = fields[2].GetUInt32();
+            if (m_mCacheVendorTemplateItemMap.find(vendor_id) != m_mCacheVendorTemplateItemMap.end())
+                vendor_ids.erase(vendor_id);
+            else if (patch <= sWorld.GetWowPatch())
+                sLog.outErrorDb("Creature (Entry: %u) has vendor_id = %u for nonexistent vendor template", creature_id, vendor_id);
         } while (result->NextRow());
         delete result;
     }
@@ -8674,12 +8780,12 @@ void ObjectMgr::LoadGossipMenuItems()
     sLog.outString(">> Loaded %u gossip_menu_option entries", count);
 }
 
-void ObjectMgr::AddVendorItem(uint32 entry, uint32 item, uint32 maxcount, uint32 incrtime)
+void ObjectMgr::AddVendorItem(uint32 entry, uint32 item, uint32 maxcount, uint32 incrtime, uint32 itemflags)
 {
     VendorItemData& vList = m_mCacheVendorItemMap[entry];
-    vList.AddItem(item, maxcount, incrtime);
+    vList.AddItem(item, maxcount, incrtime, itemflags);
 
-    WorldDatabase.PExecuteLog("INSERT INTO npc_vendor (entry,item,maxcount,incrtime) VALUES('%u','%u','%u','%u')", entry, item, maxcount, incrtime);
+    WorldDatabase.PExecuteLog("INSERT INTO npc_vendor (entry,item,maxcount,incrtime,itemflags) VALUES('%u','%u','%u','%u','%u')", entry, item, maxcount, incrtime, itemflags);
 }
 
 bool ObjectMgr::RemoveVendorItem(uint32 entry, uint32 item)
@@ -8708,7 +8814,7 @@ bool ObjectMgr::IsVendorItemValid(bool isTemplate, char const* tableName, uint32
         {
             if (pl)
                 ChatHandler(pl).SendSysMessage(LANG_COMMAND_VENDORSELECTION);
-            else
+            else if (!IsExistingCreatureId(vendor_entry))
                 sLog.outErrorDb("Table `%s` has data for nonexistent creature (Entry: %u), ignoring", tableName, vendor_entry);
             return false;
         }
@@ -8733,7 +8839,7 @@ bool ObjectMgr::IsVendorItemValid(bool isTemplate, char const* tableName, uint32
     {
         if (pl)
             ChatHandler(pl).PSendSysMessage(LANG_ITEM_NOT_FOUND, item_id);
-        else
+        else if (!IsExistingItemId(item_id))
             sLog.outErrorDb("Table `%s` for %s %u contain nonexistent item (%u), ignoring",
                             tableName, idStr, vendor_entry, item_id);
         return false;
@@ -9485,7 +9591,7 @@ void ObjectMgr::LoadConditions()
 
 
 // Check if a player meets condition conditionId
-bool ObjectMgr::IsConditionSatisfied(uint16 conditionId, WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const
+bool ObjectMgr::IsConditionSatisfied(uint32 conditionId, WorldObject const* target, Map const* map, WorldObject const* source, ConditionSource conditionSourceType) const
 {
     if (const ConditionEntry* condition = sConditionStorage.LookupEntry<ConditionEntry>(conditionId))
         return condition->Meets(target, map, source, conditionSourceType);

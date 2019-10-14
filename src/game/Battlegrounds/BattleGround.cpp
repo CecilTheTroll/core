@@ -209,7 +209,7 @@ BattleGround::BattleGround()
     m_Status            = STATUS_NONE;
     m_ClientInstanceID  = 0;
     m_EndTime           = 0;
-    m_BracketId         = BG_BRACKET_ID_TEMPLATE;        // use as mark bg template
+    m_BracketId         = BG_BRACKET_ID_NONE;        // use as mark bg template
     m_InvitedAlliance   = 0;
     m_InvitedHorde      = 0;
     m_Winner            = 2;
@@ -279,7 +279,7 @@ BattleGround::~BattleGround()
         sLog.out(LOG_BG, "[%u,%u]: winner=%u, duration=%s", GetTypeID(), GetInstanceID(), GetWinner(), secsToTimeString(GetStartTime() / 1000, true).c_str());
 
     // Pas un BG 'template'
-    if (GetBracketId() != BG_BRACKET_ID_TEMPLATE)
+    if (GetBracketId() != BG_BRACKET_ID_NONE)
         sBattleGroundMgr.DeleteClientVisibleInstanceId(GetTypeID(), GetBracketId(), GetClientInstanceID());
 
     // unload map
@@ -741,7 +741,8 @@ uint32 BattleGround::GetBonusHonorFromKill(uint32 kills) const
 
 float BattleGround::GetHonorModifier() {
     // If the game ends in under one hour, less Bonus Honor will be earned from control of mines, graveyards and for the General kill (win).
-    return GetStartTime() < HOUR * IN_MILLISECONDS ? 0.5f : 1.0f;
+    float elapsed = (float)GetStartTime() / IN_MILLISECONDS / HOUR;
+    return elapsed < 1.0f ? pow(60, elapsed - 1) : 1.0f;
 }
 
 uint32 BattleGround::GetBattlemasterEntry() const

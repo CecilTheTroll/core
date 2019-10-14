@@ -749,7 +749,7 @@ m_obj->m_updateTracker.Reset();
         {
             return obj && IsInMap(obj) && _IsWithinDist(obj,dist2compare,is3D);
         }
-        bool IsWithinLOS(float x, float y, float z, bool checkDynLos = true) const;
+        bool IsWithinLOS(float x, float y, float z, bool checkDynLos = true, float targetHeight = 2.f) const;
         bool IsWithinLOSInMap(const WorldObject* obj, bool checkDynLos = true) const;
         bool GetDistanceOrder(WorldObject const* obj1, WorldObject const* obj2, bool is3D = true) const;
         bool IsInRange(WorldObject const* obj, float minRange, float maxRange, bool is3D = true) const;
@@ -952,9 +952,19 @@ inline WorldObject* ToWorldObject(Object* object)
     return object && object->isType(TYPEMASK_WORLDOBJECT) ? static_cast<WorldObject*>(object) : nullptr;
 }
 
+inline const WorldObject* ToWorldObject(const Object* object)
+{
+    return object && object->isType(TYPEMASK_WORLDOBJECT) ? static_cast<const WorldObject*>(object) : nullptr;
+}
+
 inline GameObject* ToGameObject(Object* object)
 {
     return object && object->GetTypeId() == TYPEID_GAMEOBJECT ? reinterpret_cast<GameObject*>(object) : nullptr;
+}
+
+inline const GameObject* ToGameObject(const Object* object)
+{
+    return object && object->GetTypeId() == TYPEID_GAMEOBJECT ? reinterpret_cast<const GameObject*>(object) : nullptr;
 }
 
 inline Unit* ToUnit(Object* object)
@@ -962,14 +972,29 @@ inline Unit* ToUnit(Object* object)
     return object && object->isType(TYPEMASK_UNIT) ? reinterpret_cast<Unit*>(object) : nullptr;
 }
 
+inline const Unit* ToUnit(const Object* object)
+{
+    return object && object->isType(TYPEMASK_UNIT) ? reinterpret_cast<const Unit*>(object) : nullptr;
+}
+
 inline Creature* ToCreature(Object* object)
 {
     return object && object->GetTypeId() == TYPEID_UNIT ? reinterpret_cast<Creature*>(object) : nullptr;
 }
 
+inline const Creature* ToCreature(const Object* object)
+{
+    return object && object->GetTypeId() == TYPEID_UNIT ? reinterpret_cast<const Creature*>(object) : nullptr;
+}
+
 inline Player* ToPlayer(Object* object)
 {
     return object && object->GetTypeId() == TYPEID_PLAYER ? reinterpret_cast<Player*>(object) : nullptr;
+}
+
+inline const Player* ToPlayer(const Object* object)
+{
+    return object && object->GetTypeId() == TYPEID_PLAYER ? reinterpret_cast<const Player*>(object) : nullptr;
 }
 
 #endif

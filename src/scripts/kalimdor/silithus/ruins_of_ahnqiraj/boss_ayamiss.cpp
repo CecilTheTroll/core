@@ -72,8 +72,11 @@ struct boss_ayamissAI : public ScriptedAI
 {
     boss_ayamissAI(Creature* pCreature) : ScriptedAI(pCreature)
     {
+        m_pInstance = (ScriptedInstance*)pCreature->GetInstanceData();
         Reset();
     }
+
+    ScriptedInstance* m_pInstance;
 
     uint32 m_uiStingerSpray_Timer;
     uint32 m_uiPoisonStinger_Timer;
@@ -116,7 +119,7 @@ struct boss_ayamissAI : public ScriptedAI
         /** Configure Ayamiss into flying mode */
         m_creature->SetFly(true);
         m_creature->SetWalk(false);
-        if (IsCombatMovement())
+        if (IsCombatMovementEnabled())
             SetCombatMovement(false);
 
         /** Force despawn of invocated Hornet and Larva from Hive'Zara */
@@ -133,10 +136,21 @@ struct boss_ayamissAI : public ScriptedAI
             if ((*itr)->isAlive())
                 (*itr)->AddObjectToRemoveList();
         }
+
+        if (m_pInstance)
+            m_pInstance->SetData(TYPE_AYAMISS, NOT_STARTED);
     }
 
     void Aggro(Unit* pWho)
     {
+        if (m_pInstance)
+            m_pInstance->SetData(TYPE_AYAMISS, IN_PROGRESS);
+    }
+
+    void JustDied(Unit* pKiller)
+    {
+        if (m_pInstance)
+            m_pInstance->SetData(TYPE_AYAMISS, DONE);
     }
 
     void SpellHitTarget(Unit* pCaster, const SpellEntry* pSpell)

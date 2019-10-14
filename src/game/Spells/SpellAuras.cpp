@@ -1984,7 +1984,6 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                     return;
                 }
                 case 10848: // Shroud of Death
-                case 22650: // Ghost Visual
                 case 27978: // Shroud of Death
                     if (apply)
                         target->m_AuraFlags |= UNIT_AURAFLAG_ALIVE_INVISIBLE;
@@ -2132,21 +2131,7 @@ void Aura::HandleAuraWaterWalk(bool apply, bool Real)
     if (!Real)
         return;
 
-    WorldPacket data;
-    if (apply)
-        data.Initialize(SMSG_MOVE_WATER_WALK, 8 + 4);
-    else
-        data.Initialize(SMSG_MOVE_LAND_WALK, 8 + 4);
-    data << GetTarget()->GetPackGUID();
-    data << uint32(0);
-
-    if (Player* t = GetTarget()->ToPlayer())
-    {
-        t->GetSession()->SendPacket(&data);
-        t->GetCheatData()->OrderSent(&data);
-    }
-    else
-        GetTarget()->SendMovementMessageToSet(std::move(data), true);
+    GetTarget()->SetWaterWalk(apply);
 }
 
 void Aura::HandleAuraFeatherFall(bool apply, bool Real)
@@ -2154,24 +2139,8 @@ void Aura::HandleAuraFeatherFall(bool apply, bool Real)
     // only at real add/remove aura
     if (!Real)
         return;
-    WorldPacket data;
-    if (apply)
-        data.Initialize(SMSG_MOVE_FEATHER_FALL, 8 + 4);
-    else
-        data.Initialize(SMSG_MOVE_NORMAL_FALL, 8 + 4);
-    data << GetTarget()->GetPackGUID();
-    data << uint32(0);
 
-    if (Player* t = GetTarget()->ToPlayer())
-    {
-        t->GetSession()->SendPacket(&data);
-        t->GetCheatData()->OrderSent(&data);
-        // start fall from current height
-        if (!apply)
-            t->SetFallInformation(0, t->GetPositionZ());
-    }
-    else
-        GetTarget()->SendMovementMessageToSet(std::move(data), true);
+    GetTarget()->SetFeatherFall(apply);
 }
 
 void Aura::HandleAuraHover(bool apply, bool Real)
@@ -2180,16 +2149,7 @@ void Aura::HandleAuraHover(bool apply, bool Real)
     if (!Real)
         return;
 
-    WorldPacket data;
-    if (apply)
-        data.Initialize(SMSG_MOVE_SET_HOVER, 8 + 4);
-    else
-        data.Initialize(SMSG_MOVE_UNSET_HOVER, 8 + 4);
-    data << GetTarget()->GetPackGUID();
-    data << uint32(0);
-    GetTarget()->SendMovementMessageToSet(std::move(data), true);
-    if (Player* t = GetTarget()->ToPlayer())
-        t->GetCheatData()->OrderSent(&data);
+    GetTarget()->SetHover(apply);
 }
 
 void Aura::HandleWaterBreathing(bool /*apply*/, bool /*Real*/)
@@ -2205,10 +2165,16 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
     switch (form)
     {
     case FORM_CAT:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 892;
+        
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 892;
+            else
+                modelid = 8571;
+        }
         else
-            modelid = 8571;
+            modelid = 892;
         mod = 0.80f;
         break;
     case FORM_TRAVEL:
@@ -2220,20 +2186,20 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
         mod = 0.80f;
         break;
     case FORM_BEAR:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 2281;
+    case FORM_DIREBEAR:
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 2281;
+            else
+                modelid = 2289;
+        }
         else
-            modelid = 2289;
+            modelid = 2281;
         break;
     case FORM_GHOUL:
         if (Player::TeamForRace(target->getRace()) == ALLIANCE)
             modelid = 10045;
-        break;
-    case FORM_DIREBEAR:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 2281;
-        else
-            modelid = 2289;
         break;
     case FORM_CREATUREBEAR:
         modelid = 902;
@@ -2243,10 +2209,15 @@ std::pair<unsigned int, float> getShapeshiftModelInfo(ShapeshiftForm form, Unit 
         mod = 0.80f;
         break;
     case FORM_MOONKIN:
-        if (Player::TeamForRace(target->getRace()) == ALLIANCE)
-            modelid = 15374;
+        if (target->IsPlayer())
+        {
+            if (Player::TeamForRace(target->getRace()) == ALLIANCE)
+                modelid = 15374;
+            else
+                modelid = 15375;
+        }
         else
-            modelid = 15375;
+            modelid = 15374;
         break;
     case FORM_TREE:
         modelid = 864;
@@ -2923,8 +2894,8 @@ void Unit::ModPossess(Unit* target, bool apply, AuraRemoveMode m_removeMode)
     }
     else
     {
-        // On transfert la menace vers celui qui a CM
-        target->TransferAttackersThreatTo(caster);
+        // Clear threat generated when MC ends
+        target->RemoveAttackersThreat(caster);
 
         // spell is interrupted on channeled aura removal, don't need to interrupt here
         //caster->InterruptSpell(CURRENT_CHANNELED_SPELL);
@@ -3281,12 +3252,28 @@ void Aura::HandleFeignDeath(bool apply, bool Real)
     if (!Real)
         return;
 
+    bool success = true;
     Unit* pTarget = GetTarget();
-    // Toutes les personnes qui castent sur le casteur de FD doivent etre interrompues.
+    
     if (apply)
-        pTarget->InterruptSpellsCastedOnMe();
+    {
+        HostileReference* pReference = pTarget->getHostileRefManager().getFirst();
+        while (pReference)
+        {
+            if (Creature* refTarget = ToCreature(pReference->getSourceUnit()))
+            {
+                if (!refTarget->GetCharmerOrOwnerOrSelf()->IsPlayer() && refTarget->IsWithinDistInMap(pTarget, refTarget->GetAttackDistance(pTarget))
+                    && pTarget->MagicSpellHitResult(refTarget, GetHolder()->GetSpellProto(), nullptr) != SPELL_MISS_NONE)
+                {
+                    success = false;
+                    break;
+                }
+            }
+            pReference = pReference->next();
+        }
+    }
 
-    pTarget->SetFeignDeath(apply, GetCasterGuid(), GetId());
+    pTarget->SetFeignDeath(apply, GetCasterGuid(), success);
 }
 
 void Aura::HandleAuraModDisarm(bool apply, bool Real)
@@ -3356,6 +3343,8 @@ void Aura::HandleAuraModStun(bool apply, bool Real)
 
     if (apply)
     {
+        if (target->IsTaxiFlying())
+            return;
         // Stun/roots effects apply at charge end
         bool inCharge = target->GetMotionMaster()->GetCurrentMovementGeneratorType() == CHARGE_MOTION_TYPE;
         // Frost stun aura -> freeze/unfreeze target
@@ -3488,10 +3477,10 @@ void Aura::HandleModStealth(bool apply, bool Real)
         if (Real)
         {
             target->SetByteFlag(UNIT_FIELD_BYTES_1, 3, UNIT_BYTE1_FLAGS_CREEP);
-
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
             if (target->GetTypeId() == TYPEID_PLAYER)
                 target->SetByteFlag(PLAYER_FIELD_BYTES2, 1, PLAYER_FIELD_BYTE2_STEALTH);
-
+#endif
             // apply only if not in GM invisibility (and overwrite invisibility state)
             if (target->GetVisibility() != VISIBILITY_OFF)
             {
@@ -3519,10 +3508,10 @@ void Aura::HandleModStealth(bool apply, bool Real)
             if (target->GetVisibility() != VISIBILITY_OFF)
             {
                 target->RemoveByteFlag(UNIT_FIELD_BYTES_1, 3, UNIT_BYTE1_FLAGS_CREEP);
-
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
                 if (target->GetTypeId() == TYPEID_PLAYER)
                     target->RemoveByteFlag(PLAYER_FIELD_BYTES2, 1, PLAYER_FIELD_BYTE2_STEALTH);
-
+#endif
                 // restore invisibility if any
                 if (target->HasAuraType(SPELL_AURA_MOD_INVISIBILITY))
                 {
@@ -3547,8 +3536,10 @@ void Aura::HandleInvisibility(bool apply, bool Real)
 
         if (Real && target->GetTypeId() == TYPEID_PLAYER)
         {
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
             // apply glow vision
             target->SetByteFlag(PLAYER_FIELD_BYTES2, 1, PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW);
+#endif
 
         }
 
@@ -3571,10 +3562,11 @@ void Aura::HandleInvisibility(bool apply, bool Real)
         // only at real aura remove and if not have different invisibility auras.
         if (Real && target->m_invisibilityMask == 0)
         {
+#if SUPPORTED_CLIENT_BUILD >= CLIENT_BUILD_1_12_1
             // remove glow vision
             if (target->GetTypeId() == TYPEID_PLAYER)
                 target->RemoveByteFlag(PLAYER_FIELD_BYTES2, 1, PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW);
-
+#endif
             // apply only if not in GM invisibility & not stealthed while invisible
             if (target->GetVisibility() != VISIBILITY_OFF)
             {
@@ -3846,16 +3838,6 @@ void Aura::HandleModMechanicImmunity(bool apply, bool /*Real*/)
         return;
 
     target->ApplySpellImmune(GetId(), IMMUNITY_MECHANIC, misc, apply);
-
-    // re-apply Fear Ward if it was not wasted during Bersereker Rage
-    if (!apply && GetSpellProto()->IsFitToFamily<SPELLFAMILY_WARRIOR, CF_WARRIOR_BERSERKER_RAGE>())
-    {
-        if (target->HasAura(6346))
-        {
-            auto aura = target->GetAura(6346, EFFECT_INDEX_0);
-            aura->HandleModMechanicImmunity(true, true);
-        }
-    }
 }
 
 void Aura::HandleModMechanicImmunityMask(bool apply, bool /*Real*/)
@@ -4114,7 +4096,9 @@ void Aura::HandlePeriodicDamage(bool apply, bool Real)
             }
             case SPELLFAMILY_ROGUE:
             {
-                // Rupture
+#if SUPPORTED_CLIENT_BUILD > CLIENT_BUILD_1_11_2
+                // World of Warcraft Client Patch 1.12.0 (2006-08-22)
+                // - Rupture: Rupture now increases in potency with greater attack power.
                 if (spellProto->IsFitToFamilyMask<CF_ROGUE_RUPTURE>())
                 {
                     // Dmg/tick = $AP*min(0.01*$cp, 0.03) [Like Rip: only the first three CP increase the contribution from AP]
@@ -4125,6 +4109,13 @@ void Aura::HandlePeriodicDamage(bool apply, bool Real)
                         m_modifier.m_amount += int32(caster->GetTotalAttackPowerValue(BASE_ATTACK) * cp / 100);
                     }
                 }
+#elif SUPPORTED_CLIENT_BUILD <= CLIENT_BUILD_1_11_2
+                // World of Warcraft Client Patch 1.12.0 (2006-08-22)
+                // - Garrote: The damage from this ability has been increased. In
+                //   addition, Garrote now increases in potency with greater attack power.
+                if (spellProto->IsFitToFamilyMask<CF_ROGUE_GARROTE>())
+                    return;
+#endif
                 break;
             }
             default:
@@ -4715,6 +4706,14 @@ void Aura::HandleModAttackSpeed(bool apply, bool /*Real*/)
     target->ApplyAttackTimePercentMod(BASE_ATTACK, float(m_modifier.m_amount), apply);
     target->ApplyAttackTimePercentMod(OFF_ATTACK, float(m_modifier.m_amount), apply);
     target->ApplyAttackTimePercentMod(RANGED_ATTACK, float(m_modifier.m_amount), apply);
+
+    // Seal of the Crusader damage reduction
+    // SoC increases attack speed but reduces damage to maintain the same DPS
+    if (GetSpellProto()->IsFitToFamily<SPELLFAMILY_PALADIN, CF_PALADIN_SEAL_OF_THE_CRUSADER>())
+    {
+        float reduction = (-100.0f * m_modifier.m_amount) / (m_modifier.m_amount + 100.0f);
+        target->HandleStatModifier(UNIT_MOD_DAMAGE_MAINHAND, TOTAL_PCT, reduction, apply);
+    }
 }
 
 void Aura::HandleModMeleeSpeedPct(bool apply, bool /*Real*/)
@@ -5846,8 +5845,14 @@ void Aura::PeriodicDummyTick()
                         target->CastSpell(target, m_modifier.m_amount, true, nullptr, this);
                     return;
                 case 24596:                                 // Intoxicating Venom
-                    if (target->isInCombat() && urand(0, 99) < 7)
-                        target->AddAura(8379); // Disarm
+                    if (target->isInCombat())
+                    {
+                        uint32 rand = urand(0, 99);
+                        if (rand < 7)
+                            target->CastSpell(target, 8379, true, nullptr, this);     // Disarm
+                        else if (rand < 14)
+                            target->CastSpell(target, 6869, true, nullptr, this);     // Fall Down
+                    }
                     return;
             }
             break;
@@ -5937,7 +5942,7 @@ SpellAuraHolder::SpellAuraHolder(SpellEntry const* spellproto, Unit *target, Wor
     m_applyTime      = time(nullptr);
     m_isPassive      = IsPassiveSpell(GetId()) || spellproto->Attributes == 0x80;
     m_isDeathPersist = IsDeathPersistentSpell(spellproto);
-    m_isSingleTarget = IsSingleTargetSpell(spellproto);
+    m_isSingleTarget = HasSingleTargetAura(spellproto);
     m_procCharges    = spellproto->procCharges;
     m_isChanneled    = IsChanneledSpell(spellproto);
 
